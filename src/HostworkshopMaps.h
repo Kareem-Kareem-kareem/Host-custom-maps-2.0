@@ -1,6 +1,9 @@
 #pragma once
+
 #include "bakkesmod/plugin/bakkesmodplugin.h"
 #include "bakkesmod/plugin/pluginwindow.h"
+#include "bakkesmod/plugin/PluginSettingsWindow.h"
+
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -13,59 +16,50 @@ struct MapEntry {
     std::string extension;
 };
 
-class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
-                          public BakkesMod::Plugin::PluginWindow
+class HostWorkshopMaps 
+    : public BakkesMod::Plugin::BakkesModPlugin
+    , public BakkesMod::Plugin::PluginSettingsWindow
 {
 public:
-    void onLoad()   override;
+    void onLoad() override;
     void onUnload() override;
 
-    // ── PluginWindow ─────────────────────────────────────────────────────
-    void        Render()       override;
-    std::string GetMenuName()  override { return "hostworkshopmaps"; }
-    std::string GetMenuTitle() override { return "Host Workshop Maps"; }
-    void        SetImGuiContext(uintptr_t ctx) override;
-    bool        ShouldBlockInput()  override { return isWindowOpen_; }
-    bool        IsActiveOverlay()   override { return isWindowOpen_; }
-    void        OnOpen()  override { isWindowOpen_ = true;  }
-    void        OnClose() override { isWindowOpen_ = false; }
+    // ── PluginSettingsWindow ────────────────────────────────────────
+    void RenderSettings() override;
+    std::string GetPluginName() override { return "Host Workshop Maps"; }
+    void SetImGuiContext(uintptr_t ctx) override;
 
 private:
-    // ── Window state ─────────────────────────────────────────────────────
-    bool isWindowOpen_ = false;
-
-    // ── Map list ─────────────────────────────────────────────────────────
+    // ── State flags ─────────────────────────────────────────────────
+    bool isLoaded_ = false;
+    bool imguiInitialized_ = false;
+    
+    // ── Map list ────────────────────────────────────────────────────
     std::vector<MapEntry> mapList_;
-    int                   selectedIndex_ = -1;
-    char                  filterBuf_[256] = {};
-    std::string           filterText_;
+    int selectedIndex_ = -1;
+    char filterBuf_[256] = {};
+    std::string filterText_;
 
-    // ── Directory input buffer ────────────────────────────────────────────
+    // ── Directory input buffer ──────────────────────────────────────
     char dirBuf_[512] = {};
 
-    // ── CVar-backed settings ─────────────────────────────────────────────
+    // ── CVar-backed settings ────────────────────────────────────────
     std::string mapsDirectory_;
-    bool        autoScanOnOpen_ = true;
+    bool autoScanOnOpen_ = true;
 
-    // ── LAN state ────────────────────────────────────────────────────────
-    bool        pendingLANTransport_ = false;
-    std::string pendingMapPath_;
-    int         transportCountdown_  = 0;
-
-    // ── Status message (shown at bottom of window) ───────────────────────
+    // ── Status message ──────────────────────────────────────────────
     std::string statusMsg_;
 
-    // ── Helpers ──────────────────────────────────────────────────────────
+    // ── Helpers ─────────────────────────────────────────────────────
     void ScanMaps();
-    void LoadMap(const MapEntry& entry);
     void LoadMapPath(const std::string& path);
-    void TeleportLANPlayers(const std::string& mapPath);
-    void OnTick(std::string eventName);
     void SetStatus(const std::string& msg);
-
+    
     static std::string DefaultWorkshopPath();
     static std::string SanitizePath(const std::string& raw);
     static std::string MapNameFromPath(const std::string& path);
-
+    
     std::vector<MapEntry> FilteredMaps() const;
+    bool IsGameWrapperValid() const;
+    bool IsCVarManagerValid() const;
 };
