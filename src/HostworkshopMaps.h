@@ -17,14 +17,14 @@ struct MapEntry {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  WorkshopMapLoader
+//  HostWorkshopMaps
 //  - Scans a configurable folder (default: Steam Workshop maps dir) for
 //    .upk / .udk files
 //  - Loads any chosen map as freeplay / training (works offline & LAN)
 //  - When the host loads a map while a LAN game is active it teleports all
 //    connected players to the new map automatically
 // ─────────────────────────────────────────────────────────────────────────────
-class WorkshopMapLoader : public BakkesMod::Plugin::BakkesModPlugin,
+class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
                           public BakkesMod::Plugin::PluginWindow
 {
 public:
@@ -34,8 +34,8 @@ public:
 
     // ── PluginWindow (ImGui F2 panel) ────────────────────────────────────
     void        Render()       override;
-    std::string GetMenuName()  override { return "workshopmaploader"; }
-    std::string GetMenuTitle() override { return "Workshop Map Loader"; }
+    std::string GetMenuName()  override { return "hostworkshopmaps"; }
+    std::string GetMenuTitle() override { return "Host Workshop Maps"; }
     void        SetImGuiContext(uintptr_t ctx) override;
     bool        ShouldBlockInput()  override { return false; }
     bool        IsActiveOverlay()   override { return false; }
@@ -50,8 +50,8 @@ private:
     char                  filterBuf_[256]  = {};
 
     // ── CVar-backed settings ─────────────────────────────────────────────
-    std::string mapsDirectory_;  // from cvar wml_maps_directory
-    bool        autoScanOnOpen_; // from cvar wml_auto_scan
+    std::string mapsDirectory_;  // from cvar hwm_maps_directory
+    bool        autoScanOnOpen_; // from cvar hwm_auto_scan
 
     // ── LAN state ────────────────────────────────────────────────────────
     bool isHostingLAN_        = false;
