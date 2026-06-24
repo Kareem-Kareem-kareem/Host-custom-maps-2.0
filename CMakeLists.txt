@@ -1,441 +1,77 @@
-#include "HostworkshopMaps.h"
-#include "bakkesmod/wrappers/gamewrapper.h"
-#include "bakkesmod/wrappers/GameEvent/ServerWrapper.h"
+cmake_minimum_required(VERSION 3.15)
+project(HostWorkshopMaps)
 
-#include <algorithm>
-#include <sstream>
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-// IMPORTANT: Don't include imgui.h in the cpp file header
-// It will be available through SetImGuiContext
+# ── BakkesMod SDK path ─────────────────────────────────────────────────────
+if(NOT DEFINED BAKKESMOD_SDK)
+    set(BAKKESMOD_SDK "$ENV{BAKKESMOD_SDK}" CACHE PATH "Path to BakkesMod SDK")
+endif()
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", PLUGINTYPE_FREEPLAY)
+if(NOT EXISTS "${BAKKESMOD_SDK}/include/bakkesmod/plugin/bakkesmodplugin.h")
+    message(FATAL_ERROR 
+        "BakkesMod SDK not found at '${BAKKESMOD_SDK}'.\n"
+        "Pass -DBAKKESMOD_SDK=<path> or set BAKKESMOD_SDK environment variable."
+    )
+endif()
 
-// ═══════════════════════════════════════════════════════════════════
-// SAFE UTILITY FUNCTIONS
-// ═══════════════════════════════════════════════════════════════════
+# ── Plugin target ──────────────────────────────────────────────────────────
+add_library(HostWorkshopMaps SHARED
+    src/HostWorkshopMaps.cpp
+    src/HostWorkshopMaps.h
+)
 
-std::string HostWorkshopMaps::DefaultWorkshopPath() {
-    try {
-        const char* appdata = std::getenv("APPDATA");
-        if (appdata) {
-            fs::path bm = fs::path(appdata) / "bakkesmod" / "bakkesmod" / "data" / "workshop";
-            if (fs::exists(bm)) {
-                return bm.string();
-            }
-        }
+target_include_directories(HostWorkshopMaps PRIVATE
+    ${BAKKESMOD_SDK}/include
+    src
+)
 
-        const char* pf = std::getenv("ProgramFiles(x86)");
-        if (!pf) pf = std::getenv("ProgramFiles");
-        if (pf) {
-            fs::path steam = fs::path(pf) / "Steam" / "steamapps" / "workshop" / "content" / "252950";
-            if (fs::exists(steam)) {
-                return steam.string();
-            }
-        }
+target_link_directories(HostWorkshopMaps PRIVATE
+    ${BAKKESMOD_SDK}/lib
+)
 
-        const char* up = std::getenv("USERPROFILE");
-        if (up) {
-            fs::path docs = fs::path(up) / "Documents" / "rocketleague" / "workshop";
-            return docs.string();
-        }
-    }
-    catch (...) {
-        // Fallback if any filesystem operation fails
-    }
+target_link_libraries(HostWorkshopMaps PRIVATE
+    pluginsdk
+)
+
+if(WIN32)
+    set_target_properties(HostWorkshopMaps PROPERTIES
+        SUFFIX ".dll"
+        PREFIX ""
+    )
     
-    return "C:/Program Files (x86)/Steam/steamapps/workshop/content/252950";
-}
-
-std::string HostWorkshopMaps::SanitizePath(const std::string& raw) {
-    std::string out = raw;
-    for (char& c : out) {
-        if (c == '\\') c = '/';
-    }
-    while (!out.empty() && (out.back() == '/' || out.back() == '\\')) {
-        out.pop_back();
-    }
-    return out;
-}
-
-std::string HostWorkshopMaps::MapNameFromPath(const std::string& path) {
-    try {
-        return fs::path(path).stem().string();
-    }
-    catch (...) {
-        return "Unknown";
-    }
-}
-
-bool HostWorkshopMaps::IsGameWrapperValid() const {
-    return gameWrapper != nullptr && !gameWrapper->IsNull();
-}
-
-bool HostWorkshopMaps::IsCVarManagerValid() const {
-    return cvarManager != nullptr && !cvarManager->IsNull();
-}
-
-std::vector<MapEntry> HostWorkshopMaps::FilteredMaps() const {
-    if (filterText_.empty()) {
-        return mapList_;
-    }
-
-    std::string lf = filterText_;
-    std::transform(lf.begin(), lf.end(), lf.begin(), 
-        [](unsigned char c) { return std::tolower(c); });
-
-    std::vector<MapEntry> out;
-    for (const auto& m : mapList_) {
-        std::string ln = m.displayName;
-        std::transform(ln.begin(), ln.end(), ln.begin(),
-            [](unsigned char c) { return std::tolower(c); });
-        
-        if (ln.find(lf) != std::string::npos) {
-            out.push_back(m);
-        }
-    }
-    return out;
-}
-
-void HostWorkshopMaps::SetStatus(const std::string& msg) {
-    statusMsg_ = msg;
-    if (IsCVarManagerValid()) {
-        cvarManager->log("HostWorkshopMaps: " + msg);
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// PLUGIN LIFECYCLE
-// ═══════════════════════════════════════════════════════════════════
-
-void HostWorkshopMaps::onLoad() {
-    if (!IsCVarManagerValid()) {
-        return; // Cannot proceed without cvarManager
-    }
-
-    cvarManager->log("HostWorkshopMaps v2.0 loading...");
-
-    try {
-        // Register CVars with safe defaults
-        std::string defPath = DefaultWorkshopPath();
-        
-        auto dirCvar = cvarManager->registerCvar(
-            "hwm_maps_directory", 
-            defPath, 
-            "Workshop maps folder path",
-            true
-        );
-        
-        dirCvar.addOnValueChanged([this](std::string, CVarWrapper cv) {
-            if (!IsCVarManagerValid()) return;
-            
-            std::string newPath = SanitizePath(cv.getStringValue());
-            mapsDirectory_ = newPath;
-            
-            // Safe string copy
-            size_t copyLen = std::min(newPath.length(), sizeof(dirBuf_) - 1);
-            memcpy(dirBuf_, newPath.c_str(), copyLen);
-            dirBuf_[copyLen] = '\0';
-            
-            ScanMaps();
-        });
-
-        // Get initial value safely
-        if (IsCVarManagerValid()) {
-            auto cv = cvarManager->getCvar("hwm_maps_directory");
-            if (!cv.IsNull()) {
-                mapsDirectory_ = SanitizePath(cv.getStringValue());
-                size_t copyLen = std::min(mapsDirectory_.length(), sizeof(dirBuf_) - 1);
-                memcpy(dirBuf_, mapsDirectory_.c_str(), copyLen);
-                dirBuf_[copyLen] = '\0';
-            }
-        }
-
-        // Register notifiers
-        cvarManager->registerNotifier(
-            "hwm_scan",
-            [this](std::vector<std::string>) {
-                if (isLoaded_) ScanMaps();
-            },
-            "Scan for workshop maps",
-            PERMISSION_ALL
-        );
-
-        cvarManager->registerNotifier(
-            "hwm_list",
-            [this](std::vector<std::string>) {
-                if (!IsCVarManagerValid() || !isLoaded_) return;
-                
-                std::stringstream ss;
-                ss << "Found " << mapList_.size() << " maps:\n";
-                for (size_t i = 0; i < mapList_.size(); ++i) {
-                    ss << i << ": " << mapList_[i].displayName << "\n";
-                }
-                cvarManager->log(ss.str());
-            },
-            "List all maps in console",
-            PERMISSION_ALL
-        );
-
-        isLoaded_ = true;
-
-        // Delayed scan to ensure game is ready
-        if (IsGameWrapperValid()) {
-            gameWrapper->SetTimeout([this](GameWrapper* gw) {
-                if (isLoaded_ && gw && !gw->IsNull()) {
-                    ScanMaps();
-                    SetStatus("Ready - " + std::to_string(mapList_.size()) + " maps found");
-                }
-            }, 2.5f);
-        }
-
-        cvarManager->log("HostWorkshopMaps loaded successfully");
-    }
-    catch (const std::exception& e) {
-        if (IsCVarManagerValid()) {
-            cvarManager->log("HostWorkshopMaps ERROR in onLoad: " + std::string(e.what()));
-        }
-        isLoaded_ = false;
-    }
-    catch (...) {
-        if (IsCVarManagerValid()) {
-            cvarManager->log("HostWorkshopMaps ERROR: Unknown exception in onLoad");
-        }
-        isLoaded_ = false;
-    }
-}
-
-void HostWorkshopMaps::onUnload() {
-    isLoaded_ = false;
-    imguiInitialized_ = false;
-    mapList_.clear();
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// MAP SCANNING
-// ═══════════════════════════════════════════════════════════════════
-
-void HostWorkshopMaps::ScanMaps() {
-    if (!isLoaded_) return;
-
-    mapList_.clear();
-    selectedIndex_ = -1;
-
-    if (mapsDirectory_.empty()) {
-        SetStatus("No directory set");
-        return;
-    }
-
-    try {
-        fs::path dir(mapsDirectory_);
-        
-        if (!fs::exists(dir)) {
-            SetStatus("Directory does not exist: " + mapsDirectory_);
-            return;
-        }
-
-        if (!fs::is_directory(dir)) {
-            SetStatus("Path is not a directory: " + mapsDirectory_);
-            return;
-        }
-
-        for (auto& entry : fs::recursive_directory_iterator(
-            dir, 
-            fs::directory_options::skip_permission_denied
-        )) {
-            try {
-                if (!entry.is_regular_file()) continue;
-
-                std::string ext = entry.path().extension().string();
-                std::transform(ext.begin(), ext.end(), ext.begin(),
-                    [](unsigned char c) { return std::tolower(c); });
-
-                if (ext == ".upk" || ext == ".udk") {
-                    MapEntry me;
-                    me.extension = ext.substr(1);
-                    me.fullPath = SanitizePath(entry.path().string());
-                    me.displayName = MapNameFromPath(me.fullPath);
-                    mapList_.push_back(me);
-                }
-            }
-            catch (...) {
-                // Skip files that cause errors
-                continue;
-            }
-        }
-
-        std::sort(mapList_.begin(), mapList_.end(),
-            [](const MapEntry& a, const MapEntry& b) {
-                return a.displayName < b.displayName;
-            });
-
-        SetStatus("Scan complete - " + std::to_string(mapList_.size()) + " maps found");
-    }
-    catch (const fs::filesystem_error& e) {
-        SetStatus("Filesystem error: " + std::string(e.what()));
-    }
-    catch (const std::exception& e) {
-        SetStatus("Scan error: " + std::string(e.what()));
-    }
-    catch (...) {
-        SetStatus("Unknown error during scan");
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// MAP LOADING
-// ═══════════════════════════════════════════════════════════════════
-
-void HostWorkshopMaps::LoadMapPath(const std::string& path) {
-    if (!isLoaded_ || !IsGameWrapperValid() || !IsCVarManagerValid()) {
-        SetStatus("Cannot load map - game not ready");
-        return;
-    }
-
-    if (path.empty()) {
-        SetStatus("Invalid map path");
-        return;
-    }
-
-    try {
-        if (!fs::exists(path)) {
-            SetStatus("Map file not found: " + path);
-            return;
-        }
-
-        std::string cmd = "load_workshop \"" + path + "\"";
-        cvarManager->executeCommand(cmd, false);
-        
-        SetStatus("Loading: " + MapNameFromPath(path));
-    }
-    catch (const std::exception& e) {
-        SetStatus("Error loading map: " + std::string(e.what()));
-    }
-    catch (...) {
-        SetStatus("Unknown error loading map");
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
-// IMGUI RENDERING
-// ═══════════════════════════════════════════════════════════════════
-
-void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx) {
-    if (ctx == 0) return;
+    target_compile_definitions(HostWorkshopMaps PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        _CRT_SECURE_NO_WARNINGS
+    )
     
-    try {
-        ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
-        imguiInitialized_ = true;
-    }
-    catch (...) {
-        imguiInitialized_ = false;
-    }
-}
+    # Add safety flags
+    target_compile_options(HostWorkshopMaps PRIVATE
+        /W4          # Warning level 4
+        /WX-         # Don't treat warnings as errors (for now)
+        /EHsc        # Exception handling
+        /permissive- # Standards conformance
+    )
+endif()
 
-void HostWorkshopMaps::RenderSettings() {
-    if (!isLoaded_ || !imguiInitialized_) return;
-
-    try {
-        ImGui::TextColored(ImVec4(0.4f, 0.8f, 1.0f, 1.0f), "Host Workshop Maps v2.0");
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        // Directory input
-        ImGui::Text("Maps Directory:");
-        ImGui::PushItemWidth(-80);
-        if (ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), 
-            ImGuiInputTextFlags_EnterReturnsTrue)) {
-            if (IsCVarManagerValid()) {
-                auto cv = cvarManager->getCvar("hwm_maps_directory");
-                if (!cv.IsNull()) {
-                    cv.setValue(std::string(dirBuf_));
-                }
-            }
-        }
-        ImGui::PopItemWidth();
-        
-        ImGui::SameLine();
-        if (ImGui::Button("Apply", ImVec2(70, 0))) {
-            if (IsCVarManagerValid()) {
-                auto cv = cvarManager->getCvar("hwm_maps_directory");
-                if (!cv.IsNull()) {
-                    cv.setValue(std::string(dirBuf_));
-                }
-            }
-        }
-
-        ImGui::Spacing();
-        
-        if (ImGui::Button("Scan Maps", ImVec2(120, 0))) {
-            ScanMaps();
-        }
-        
-        ImGui::SameLine();
-        ImGui::TextDisabled("(%d maps found)", (int)mapList_.size());
-
-        ImGui::Spacing();
-        ImGui::Separator();
-        ImGui::Spacing();
-
-        // Filter
-        ImGui::SetNextItemWidth(-1);
-        if (ImGui::InputTextWithHint("##filter", "Search maps...", 
-            filterBuf_, sizeof(filterBuf_))) {
-            filterText_ = filterBuf_;
-        }
-
-        ImGui::Spacing();
-
-        // Map list
-        auto filtered = FilteredMaps();
-        float listHeight = ImGui::GetContentRegionAvail().y - 80;
-        
-        ImGui::BeginChild("##maplist", ImVec2(0, listHeight), true);
-        
-        if (filtered.empty()) {
-            ImGui::TextDisabled("No maps found. Check directory and click 'Scan Maps'.");
-        } else {
-            for (int i = 0; i < (int)filtered.size(); ++i) {
-                bool isSelected = (i == selectedIndex_);
-                std::string label = filtered[i].displayName + " [" + 
-                                  filtered[i].extension + "]";
-                
-                if (ImGui::Selectable(label.c_str(), isSelected)) {
-                    selectedIndex_ = i;
-                }
-                
-                if (isSelected && ImGui::IsItemHovered()) {
-                    ImGui::SetTooltip("%s", filtered[i].fullPath.c_str());
-                }
-            }
-        }
-        
-        ImGui::EndChild();
-
-        ImGui::Spacing();
-
-        // Load button
-        bool canLoad = (selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size());
-        
-        if (!canLoad) ImGui::BeginDisabled();
-        
-        if (ImGui::Button("Load Selected Map", ImVec2(150, 0)) && canLoad) {
-            LoadMapPath(filtered[selectedIndex_].fullPath);
-        }
-        
-        if (!canLoad) ImGui::EndDisabled();
-
-        ImGui::SameLine();
-        if (!statusMsg_.empty()) {
-            ImGui::TextColored(ImVec4(0.7f, 0.9f, 0.7f, 1.0f), "%s", statusMsg_.c_str());
-        }
-    }
-    catch (const std::exception& e) {
-        if (IsCVarManagerValid()) {
-            cvarManager->log("ImGui render error: " + std::string(e.what()));
-        }
-    }
-    catch (...) {
-        // Silently fail to prevent crashes
-    }
-}
+# ── Optional: auto-copy into local BakkesMod folder ───────────────────────
+if(DEFINED ENV{APPDATA} AND NOT DEFINED ENV{CI})
+    set(BM_PLUGINS "$ENV{APPDATA}/bakkesmod/bakkesmod/plugins")
+    set(BM_SETTINGS "$ENV{APPDATA}/bakkesmod/bakkesmod/plugins/settings")
+    
+    add_custom_command(TARGET HostWorkshopMaps POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${BM_PLUGINS}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${BM_SETTINGS}"
+        COMMAND ${CMAKE_COMMAND} -E copy 
+            $<TARGET_FILE:HostWorkshopMaps>
+            "${BM_PLUGINS}/HostWorkshopMaps.dll"
+        COMMAND ${CMAKE_COMMAND} -E copy
+            "${CMAKE_SOURCE_DIR}/HostWorkshopMaps.set"
+            "${BM_SETTINGS}/HostWorkshopMaps.set"
+        COMMENT "Auto-copying to BakkesMod plugins folder"
+    )
+    
+    message(STATUS "Auto-copy enabled: DLL and .set will be copied to BakkesMod folder")
+endif()
