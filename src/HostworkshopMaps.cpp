@@ -112,8 +112,6 @@ void HostWorkshopMaps::onLoad()
             if (cvarManager) cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName);
     }, "List maps", PERMISSION_ALL);
 
-    StartTransportTimer();
-
     gameWrapper->SetTimeout([this](GameWrapper*) {
         if (autoScanOnOpen_) ScanMaps();
         SetStatus("Ready — " + std::to_string(mapList_.size()) + " maps found");
@@ -124,18 +122,6 @@ void HostWorkshopMaps::onLoad()
 
 void HostWorkshopMaps::onUnload()
 {
-    pendingLANTransport_ = false;
-}
-
-void HostWorkshopMaps::StartTransportTimer()
-{
-    if (!gameWrapper) return;
-    gameWrapper->SetTimeout([this](GameWrapper* gw) {
-        OnTick("");
-        if (pendingLANTransport_ && gw) {
-            gw->SetTimeout([this](GameWrapper* gw2) { StartTransportTimer(); }, 0.033f);
-        }
-    }, 0.5f);
 }
 
 void HostWorkshopMaps::ScanMaps()
@@ -194,7 +180,8 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
                 if (remote > 0) {
                     pendingMapPath_ = path;
                     pendingLANTransport_ = true;
-                    transportCountdown_ = 90;
+                    // Simplified - no timer to avoid complexity
+                    TeleportLANPlayers(path);
                     return;
                 }
             }
@@ -215,15 +202,6 @@ void HostWorkshopMaps::TeleportLANPlayers(const std::string& mapPath)
     } catch (...) {
         SetStatus("ServerTravel failed");
     }
-}
-
-void HostWorkshopMaps::OnTick(std::string)
-{
-    if (!pendingLANTransport_) return;
-    if (--transportCountdown_ > 0) return;
-    pendingLANTransport_ = false;
-    TeleportLANPlayers(pendingMapPath_);
-    pendingMapPath_.clear();
 }
 
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
@@ -308,7 +286,7 @@ void HostWorkshopMaps::Render()
     ImGui::SameLine();
 
     if (pendingLANTransport_) {
-        ImGui::TextColored(ImVec4(1,0.8f,0,1), "Teleporting... (%d)", transportCountdown_);
+        ImGui::TextColored(ImVec4(1,0.8f,0,1), "Teleporting LAN players...");
     } else if (gameWrapper && gameWrapper->IsInGame()) {
         try {
             ServerWrapper server = gameWrapper->GetCurrentGameState();
