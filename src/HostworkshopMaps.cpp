@@ -69,7 +69,8 @@ void HostWorkshopMaps::onLoad()
 
     std::string defPath = DefaultWorkshopPath();
 
-    cvarManager->registerCvar("hwm_maps_directory", defPath, "Folder to scan for .upk/.udk workshop maps", true)
+    cvarManager->registerCvar("hwm_maps_directory", defPath,
+        "Folder to scan for .upk/.udk workshop maps", true)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
             strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
