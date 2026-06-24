@@ -1,12 +1,10 @@
 #include "HostworkshopMaps.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/GameEvent/ServerWrapper.h"
+#include "imgui.h"
 
 #include <algorithm>
 #include <sstream>
-
-// IMPORTANT: Don't include imgui.h in the cpp file header
-// It will be available through SetImGuiContext
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", PLUGINTYPE_FREEPLAY)
 
@@ -67,11 +65,11 @@ std::string HostWorkshopMaps::MapNameFromPath(const std::string& path) {
 }
 
 bool HostWorkshopMaps::IsGameWrapperValid() const {
-    return gameWrapper != nullptr && !gameWrapper->IsNull();
+    return gameWrapper != nullptr;
 }
 
 bool HostWorkshopMaps::IsCVarManagerValid() const {
-    return cvarManager != nullptr && !cvarManager->IsNull();
+    return cvarManager != nullptr;
 }
 
 std::vector<MapEntry> HostWorkshopMaps::FilteredMaps() const {
@@ -141,13 +139,12 @@ void HostWorkshopMaps::onLoad() {
 
         // Get initial value safely
         if (IsCVarManagerValid()) {
-            auto cv = cvarManager->getCvar("hwm_maps_directory");
-            if (!cv.IsNull()) {
-                mapsDirectory_ = SanitizePath(cv.getStringValue());
-                size_t copyLen = std::min(mapsDirectory_.length(), sizeof(dirBuf_) - 1);
-                memcpy(dirBuf_, mapsDirectory_.c_str(), copyLen);
-                dirBuf_[copyLen] = '\0';
-            }
+            mapsDirectory_ = SanitizePath(
+                cvarManager->getCvar("hwm_maps_directory").getStringValue()
+            );
+            size_t copyLen = std::min(mapsDirectory_.length(), sizeof(dirBuf_) - 1);
+            memcpy(dirBuf_, mapsDirectory_.c_str(), copyLen);
+            dirBuf_[copyLen] = '\0';
         }
 
         // Register notifiers
@@ -181,7 +178,7 @@ void HostWorkshopMaps::onLoad() {
         // Delayed scan to ensure game is ready
         if (IsGameWrapperValid()) {
             gameWrapper->SetTimeout([this](GameWrapper* gw) {
-                if (isLoaded_ && gw && !gw->IsNull()) {
+                if (isLoaded_ && gw) {
                     ScanMaps();
                     SetStatus("Ready - " + std::to_string(mapList_.size()) + " maps found");
                 }
@@ -346,10 +343,7 @@ void HostWorkshopMaps::RenderSettings() {
         if (ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), 
             ImGuiInputTextFlags_EnterReturnsTrue)) {
             if (IsCVarManagerValid()) {
-                auto cv = cvarManager->getCvar("hwm_maps_directory");
-                if (!cv.IsNull()) {
-                    cv.setValue(std::string(dirBuf_));
-                }
+                cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
             }
         }
         ImGui::PopItemWidth();
@@ -357,10 +351,7 @@ void HostWorkshopMaps::RenderSettings() {
         ImGui::SameLine();
         if (ImGui::Button("Apply", ImVec2(70, 0))) {
             if (IsCVarManagerValid()) {
-                auto cv = cvarManager->getCvar("hwm_maps_directory");
-                if (!cv.IsNull()) {
-                    cv.setValue(std::string(dirBuf_));
-                }
+                cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
             }
         }
 
