@@ -5,7 +5,6 @@
 #include "bakkesmod/plugin/pluginwindow.h"
 #include "imgui.h"
 #include <algorithm>
-#include <sstream>
 #include <cctype>
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.5", PLUGINTYPE_FREEPLAY)
@@ -66,7 +65,7 @@ void HostWorkshopMaps::onLoad()
 {
     if (!cvarManager || !gameWrapper) return;
 
-    cvarManager->log("HostWorkshopMaps: loading v1.5 (crash-resistant)");
+    cvarManager->log("HostWorkshopMaps: loading v1.5 (stability fixes)");
 
     std::string defPath = DefaultWorkshopPath();
 
@@ -87,7 +86,6 @@ void HostWorkshopMaps::onLoad()
         });
     autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
 
-    // Console commands
     cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>) {
         if (cvarManager) cvarManager->executeCommand("togglemenu hostworkshopmaps");
     }, "Toggle window", PERMISSION_ALL);
@@ -246,7 +244,6 @@ void HostWorkshopMaps::Render()
         return;
     }
 
-    // Directory bar
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - 130);
     if (ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), ImGuiInputTextFlags_EnterReturnsTrue)) {
         if (cvarManager) cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
@@ -261,7 +258,6 @@ void HostWorkshopMaps::Render()
 
     ImGui::Spacing();
 
-    // Search
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     if (ImGui::InputTextWithHint("##filter", "Search maps...", filterBuf_, sizeof(filterBuf_)))
         filterText_ = filterBuf_;
