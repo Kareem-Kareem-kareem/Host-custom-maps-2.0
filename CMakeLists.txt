@@ -5,8 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # ── BakkesMod SDK path ───────────────────────────────────────────────────────
-# Pass the SDK root on the command line, e.g.:
-#   cmake -B build -S . -DBAKKESMOD_SDK="C:/path/to/BakkesModSDK"
 if(NOT DEFINED BAKKESMOD_SDK)
     set(BAKKESMOD_SDK "$ENV{BAKKESMOD_SDK}" CACHE PATH "Path to BakkesMod SDK")
 endif()
@@ -17,11 +15,25 @@ if(NOT EXISTS "${BAKKESMOD_SDK}/include/bakkesmod/plugin/bakkesmodplugin.h")
         "Pass -DBAKKESMOD_SDK=<path to the cloned BakkesModSDK repo root>.")
 endif()
 
-# ── ImGui source (included in the BakkesMod SDK) ────────────────────────────
-# The SDK ships imgui under ${BAKKESMOD_SDK}/include/imgui or similar;
-# if it doesn't, add your own copy here.
-file(GLOB IMGUI_SOURCES
-    "${BAKKESMOD_SDK}/include/imgui/*.cpp"
+# ── ImGui (vendored under third_party/imgui) ────────────────────────────────
+# build.yml downloads imgui automatically into third_party/imgui.
+# For local builds: clone https://github.com/ocornut/imgui into third_party/imgui
+if(NOT DEFINED IMGUI_DIR)
+    set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/third_party/imgui")
+endif()
+
+if(NOT EXISTS "${IMGUI_DIR}/imgui.h")
+    message(FATAL_ERROR
+        "ImGui not found at '${IMGUI_DIR}'.\n"
+        "The CI workflow downloads it automatically.\n"
+        "For local builds: git clone https://github.com/ocornut/imgui third_party/imgui")
+endif()
+
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
 )
 
 # ── Plugin target ────────────────────────────────────────────────────────────
@@ -32,7 +44,7 @@ add_library(WorkshopMapLoader SHARED
 
 target_include_directories(WorkshopMapLoader PRIVATE
     ${BAKKESMOD_SDK}/include
-    ${BAKKESMOD_SDK}/include/imgui
+    ${IMGUI_DIR}
     src
 )
 
