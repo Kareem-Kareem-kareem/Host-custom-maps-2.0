@@ -101,7 +101,8 @@ void WorkshopMapLoader::onLoad()
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
             cvarManager->log("WorkshopMapLoader: maps directory set to: " + mapsDirectory_);
-            ScanMaps();
+            // Defer so the cvar system has finished writing before we scan
+            gameWrapper->SetTimeout([this](GameWrapper*) { ScanMaps(); }, 0.5f);
         });
     mapsDirectory_ = SanitizePath(
         cvarManager->getCvar("wml_maps_directory").getStringValue());
@@ -166,10 +167,16 @@ void WorkshopMapLoader::onLoad()
     gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
         [this](std::string e) { OnTick(e); });
 
-    // ── Initial scan ───────────────────────────────────────────────────
-    ScanMaps();
+    // ── Deferred initial scan (after game finishes initialising) ───────
+    // Doing a filesystem scan synchronously in onLoad can crash the game
+    // because BakkesMod injects before the engine is fully ready.
+    gameWrapper->SetTimeout([this](GameWrapper*) {
+        ScanMaps();
+        cvarManager->log("WorkshopMapLoader: initial scan done — "
+            + std::to_string(mapList_.size()) + " maps in " + mapsDirectory_);
+    }, 3.0f);
 
-    cvarManager->log("WorkshopMapLoader: loaded OK — " + std::to_string(mapList_.size()) + " maps in " + mapsDirectory_);
+    cvarManager->log("WorkshopMapLoader: loaded OK — scan scheduled");
 }
 
 void WorkshopMapLoader::onUnload()
