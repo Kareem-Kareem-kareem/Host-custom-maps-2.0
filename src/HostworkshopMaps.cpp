@@ -10,7 +10,9 @@
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.5", PLUGINTYPE_FREEPLAY)
 
-// Path utilities
+// ═══════════════════════════════════════════════════════════════════════════
+//  Path utilities
+// ═══════════════════════════════════════════════════════════════════════════
 std::string HostWorkshopMaps::DefaultWorkshopPath()
 {
     const char* appdata = std::getenv("APPDATA");
@@ -62,7 +64,9 @@ void HostWorkshopMaps::SetStatus(const std::string& msg)
     if (cvarManager) cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
-// onLoad
+// ═══════════════════════════════════════════════════════════════════════════
+//  onLoad
+// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::onLoad()
 {
     if (!cvarManager || !gameWrapper) return;
@@ -74,23 +78,21 @@ void HostWorkshopMaps::onLoad()
     cvarManager->registerCvar("hwm_maps_directory", defPath,
         "Folder to scan for .upk/.udk workshop maps", true)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
-            if (this) {
-                mapsDirectory_ = SanitizePath(cv.getStringValue());
-                strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
-                if (gameWrapper) gameWrapper->SetTimeout([this](GameWrapper*) { ScanMaps(); }, 0.5f);
-            }
+            mapsDirectory_ = SanitizePath(cv.getStringValue());
+            strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
+            if (gameWrapper) gameWrapper->SetTimeout([this](GameWrapper*) { ScanMaps(); }, 0.5f);
         });
 
     mapsDirectory_ = SanitizePath(cvarManager->getCvar("hwm_maps_directory").getStringValue());
     strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
 
-    cvarManager->registerCvar("hwm_auto_scan", "1",
-        "Auto-scan on open", true, true, 0, true, 1)
+    cvarManager->registerCvar("hwm_auto_scan", "1", "Auto-scan on open", true, true, 0, true, 1)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
-            if (this) autoScanOnOpen_ = cv.getBoolValue();
+            autoScanOnOpen_ = cv.getBoolValue();
         });
     autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
 
+    // Console commands
     cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>) {
         if (cvarManager) cvarManager->executeCommand("togglemenu hostworkshopmaps");
     }, "Toggle window", PERMISSION_ALL);
@@ -143,6 +145,9 @@ void HostWorkshopMaps::StartTransportTimer()
     }, 0.5f);
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  Core functions
+// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::ScanMaps()
 {
     mapList_.clear();
@@ -231,6 +236,9 @@ void HostWorkshopMaps::OnTick(std::string)
     pendingMapPath_.clear();
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+//  ImGui Render
+// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 {
     ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
