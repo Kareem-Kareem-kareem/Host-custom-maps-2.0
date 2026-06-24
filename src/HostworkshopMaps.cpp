@@ -8,77 +8,49 @@
 #include <sstream>
 #include <cctype>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.1", PLUGINTYPE_FREEPLAY)
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.2", PLUGINTYPE_FREEPLAY)
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  Constants
+//  Path utilities
 // ═══════════════════════════════════════════════════════════════════════════
-static constexpr int LAN_TRANSPORT_DELAY_TICKS = 60; // ~1 second at 60 fps
-
-// ═══════════════════════════════════════════════════════════════════════════
-//  Helpers – path utilities
-// ═══════════════════════════════════════════════════════════════════════════
-
 std::string HostWorkshopMaps::DefaultWorkshopPath()
 {
-    // Standard Steam Workshop location for Rocket League (UE3 era)
-    // Tries APPDATA first, then common Steam paths
     const char* appdata = std::getenv("APPDATA");
-    if (appdata)
-    {
-        // Some users have maps under %APPDATA%/bakkesmod/bakkesmod/data/workshop
+    if (appdata) {
         std::string bm = std::string(appdata) + "/bakkesmod/bakkesmod/data/workshop";
         if (fs::exists(bm)) return bm;
     }
-
-    // Steam default library
-    const char* programfiles = std::getenv("ProgramFiles(x86)");
-    if (!programfiles) programfiles = std::getenv("ProgramFiles");
-    if (programfiles)
-    {
-        std::string steam = std::string(programfiles)
-            + "/Steam/steamapps/workshop/content/252950";
+    const char* pf = std::getenv("ProgramFiles(x86)");
+    if (!pf) pf = std::getenv("ProgramFiles");
+    if (pf) {
+        std::string steam = std::string(pf) + "/Steam/steamapps/workshop/content/252950";
         if (fs::exists(steam)) return steam;
     }
-
-    // Fallback: user's Documents
-    const char* userprofile = std::getenv("USERPROFILE");
-    if (userprofile)
-    {
-        std::string docs = std::string(userprofile) + "/Documents/rocketleague/workshop";
-        return docs; // return even if it doesn't exist yet
-    }
-
+    const char* up = std::getenv("USERPROFILE");
+    if (up) return std::string(up) + "/Documents/rocketleague/workshop";
     return "C:/Program Files (x86)/Steam/steamapps/workshop/content/252950";
 }
 
 std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
 {
     std::string out = raw;
-    // Normalise backslash → forward slash for Unreal's ServerTravel
     for (char& c : out) if (c == '\\') c = '/';
-    // Strip trailing slash
-    while (!out.empty() && (out.back() == '/' || out.back() == '\\'))
-        out.pop_back();
+    while (!out.empty() && (out.back() == '/' || out.back() == '\\')) out.pop_back();
     return out;
 }
 
 std::string HostWorkshopMaps::MapNameFromPath(const std::string& path)
 {
-    fs::path p(path);
-    return p.stem().string(); // filename without extension
+    return fs::path(path).stem().string();
 }
 
 std::vector<MapEntry> HostWorkshopMaps::FilteredMaps() const
 {
     if (filterText_.empty()) return mapList_;
-
     std::string lf = filterText_;
     std::transform(lf.begin(), lf.end(), lf.begin(), [](unsigned char c){ return std::tolower(c); });
-
     std::vector<MapEntry> out;
-    for (auto& m : mapList_)
-    {
+    for (auto& m : mapList_) {
         std::string ln = m.displayName;
         std::transform(ln.begin(), ln.end(), ln.begin(), [](unsigned char c){ return std::tolower(c); });
         if (ln.find(lf) != std::string::npos) out.push_back(m);
@@ -86,97 +58,79 @@ std::vector<MapEntry> HostWorkshopMaps::FilteredMaps() const
     return out;
 }
 
+void HostWorkshopMaps::SetStatus(const std::string& msg)
+{
+    statusMsg_ = msg;
+    cvarManager->log("HostWorkshopMaps: " + msg);
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-//  onLoad – register cvars, notifiers, hooks
+//  onLoad
 // ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::onLoad()
 {
     cvarManager->log("HostWorkshopMaps: loading");
 
-    // ── CVars ──────────────────────────────────────────────────────────
     std::string defPath = DefaultWorkshopPath();
 
     cvarManager->registerCvar("hwm_maps_directory", defPath,
         "Folder to scan for .upk/.udk workshop maps", true)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
-            cvarManager->log("HostWorkshopMaps: maps directory set to: " + mapsDirectory_);
-            // Defer so the cvar system has finished writing before we scan
+            strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
             gameWrapper->SetTimeout([this](GameWrapper*) { ScanMaps(); }, 0.5f);
         });
-    mapsDirectory_ = SanitizePath(
-        cvarManager->getCvar("hwm_maps_directory").getStringValue());
+    mapsDirectory_ = SanitizePath(cvarManager->getCvar("hwm_maps_directory").getStringValue());
+    strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
 
     cvarManager->registerCvar("hwm_auto_scan", "1",
-        "Automatically re-scan the maps folder when the plugin window opens",
-        true, true, 0, true, 1)
+        "Auto-scan on open", true, true, 0, true, 1)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             autoScanOnOpen_ = cv.getBoolValue();
         });
     autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
 
-    // ── Notifiers ──────────────────────────────────────────────────────
+    // Toggle window open/close
+    cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>) {
+        if (isWindowOpen_) {
+            cvarManager->executeCommand("togglemenu hostworkshopmaps");
+        } else {
+            cvarManager->executeCommand("togglemenu hostworkshopmaps");
+        }
+    }, "Toggle the Host Workshop Maps window", PERMISSION_ALL);
 
-    // Manual scan
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) {
         ScanMaps();
-        cvarManager->log("HostWorkshopMaps: scan complete — " + std::to_string(mapList_.size()) + " maps found");
-    }, "Scan the maps directory for .upk/.udk files", PERMISSION_ALL);
+    }, "Scan maps directory", PERMISSION_ALL);
 
-    // Load map by index in the list
     cvarManager->registerNotifier("hwm_load_index", [this](std::vector<std::string> args) {
-        if (args.size() < 2) {
-            cvarManager->log("HostWorkshopMaps: hwm_load_index <index>");
-            return;
-        }
+        if (args.size() < 2) return;
         int idx = std::stoi(args[1]);
-        if (idx < 0 || idx >= (int)mapList_.size()) {
-            cvarManager->log("HostWorkshopMaps: index out of range");
-            return;
-        }
-        LoadMap(mapList_[idx]);
-    }, "Load a map by its index in the scanned list", PERMISSION_ALL);
+        if (idx >= 0 && idx < (int)mapList_.size()) LoadMap(mapList_[idx]);
+    }, "Load map by index", PERMISSION_ALL);
 
-    // Load map by full path  
     cvarManager->registerNotifier("hwm_load_path", [this](std::vector<std::string> args) {
-        if (args.size() < 2) {
-            cvarManager->log("HostWorkshopMaps: hwm_load_path <full path>");
-            return;
-        }
-        // Rejoin args (path may contain spaces)
+        if (args.size() < 2) return;
         std::string path;
-        for (size_t i = 1; i < args.size(); ++i) {
-            if (i > 1) path += " ";
-            path += args[i];
-        }
+        for (size_t i = 1; i < args.size(); ++i) { if (i > 1) path += " "; path += args[i]; }
         LoadMapPath(SanitizePath(path));
-    }, "Load a map by its absolute file path", PERMISSION_ALL);
+    }, "Load map by path", PERMISSION_ALL);
 
-    // List maps in console
     cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>) {
-        if (mapList_.empty()) {
-            cvarManager->log("HostWorkshopMaps: no maps found. Run hwm_scan first.");
-            return;
-        }
         for (int i = 0; i < (int)mapList_.size(); ++i)
-            cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName
-                + "  (" + mapList_[i].extension + ")  " + mapList_[i].fullPath);
-    }, "List all scanned maps in the BakkesMod console", PERMISSION_ALL);
+            cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName + "  " + mapList_[i].fullPath);
+    }, "List maps in console", PERMISSION_ALL);
 
-    // ── Tick hook (for delayed LAN transport) ──────────────────────────
+    // Bind F4 to toggle by default (user can rebind in BM keybinds)
     gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
         [this](std::string e) { OnTick(e); });
 
-    // ── Deferred initial scan (after game finishes initialising) ───────
-    // Doing a filesystem scan synchronously in onLoad can crash the game
-    // because BakkesMod injects before the engine is fully ready.
     gameWrapper->SetTimeout([this](GameWrapper*) {
         ScanMaps();
-        cvarManager->log("HostWorkshopMaps: initial scan done — "
-            + std::to_string(mapList_.size()) + " maps in " + mapsDirectory_);
+        SetStatus("Ready — " + std::to_string(mapList_.size()) + " maps found");
     }, 3.0f);
 
-    cvarManager->log("HostWorkshopMaps: loaded OK — scan scheduled");
+    cvarManager->log("HostWorkshopMaps: loaded — open with 'hwm_toggle' or bind a key in BakkesMod");
 }
 
 void HostWorkshopMaps::onUnload()
@@ -185,162 +139,102 @@ void HostWorkshopMaps::onUnload()
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  ScanMaps – walk the maps directory recursively for .upk / .udk
+//  ScanMaps
 // ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::ScanMaps()
 {
     mapList_.clear();
     selectedIndex_ = -1;
 
-    if (mapsDirectory_.empty()) {
-        cvarManager->log("HostWorkshopMaps: maps directory is empty – set hwm_maps_directory");
-        return;
-    }
+    if (mapsDirectory_.empty()) { SetStatus("Maps directory not set"); return; }
 
     fs::path dir(mapsDirectory_);
-    if (!fs::exists(dir)) {
-        cvarManager->log("HostWorkshopMaps: directory does not exist: " + mapsDirectory_);
-        return;
-    }
+    if (!fs::exists(dir)) { SetStatus("Directory not found: " + mapsDirectory_); return; }
 
     try {
-        for (auto& entry : fs::recursive_directory_iterator(
-                dir, fs::directory_options::skip_permission_denied))
-        {
+        for (auto& entry : fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied)) {
             if (!entry.is_regular_file()) continue;
-
             std::string ext = entry.path().extension().string();
-            // normalise to lower-case
-            std::transform(ext.begin(), ext.end(), ext.begin(),
-                [](unsigned char c){ return std::tolower(c); });
-
+            std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
             if (ext == ".upk" || ext == ".udk") {
                 MapEntry me;
-                me.extension   = ext.substr(1); // strip leading '.'
+                me.extension   = ext.substr(1);
                 me.fullPath    = SanitizePath(entry.path().string());
                 me.displayName = MapNameFromPath(me.fullPath);
                 mapList_.push_back(me);
             }
         }
     } catch (const std::exception& ex) {
-        cvarManager->log(std::string("HostWorkshopMaps: scan error: ") + ex.what());
+        SetStatus(std::string("Scan error: ") + ex.what());
+        return;
     }
 
-    // Sort alphabetically
     std::sort(mapList_.begin(), mapList_.end(),
-        [](const MapEntry& a, const MapEntry& b){
-            return a.displayName < b.displayName;
-        });
+        [](const MapEntry& a, const MapEntry& b){ return a.displayName < b.displayName; });
 
-    cvarManager->log("HostWorkshopMaps: scan done — " + std::to_string(mapList_.size()) + " maps found");
+    SetStatus(std::to_string(mapList_.size()) + " maps found in " + mapsDirectory_);
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
 //  LoadMap / LoadMapPath
 // ═══════════════════════════════════════════════════════════════════════════
-void HostWorkshopMaps::LoadMap(const MapEntry& entry)
-{
-    LoadMapPath(entry.fullPath);
-}
+void HostWorkshopMaps::LoadMap(const MapEntry& entry) { LoadMapPath(entry.fullPath); }
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
-    if (path.empty()) {
-        cvarManager->log("HostWorkshopMaps: LoadMapPath called with empty path");
+    if (path.empty() || !fs::exists(fs::path(path))) {
+        SetStatus("Map file not found: " + path);
         return;
     }
 
-    // Validate the file still exists
-    if (!fs::exists(fs::path(path))) {
-        cvarManager->log("HostWorkshopMaps: map file not found: " + path);
-        return;
-    }
+    SetStatus("Loading: " + MapNameFromPath(path));
 
-    cvarManager->log("HostWorkshopMaps: loading map: " + path);
-
-    // ── Check if we're currently hosting a LAN match ──────────────────
     bool inGame = gameWrapper->IsInGame();
-    if (inGame)
-    {
+    if (inGame) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
-        if (!server.IsNull() && server.HasAuthority())
-        {
-            // Count remote players: if > 0 we're a LAN host with guests
+        if (!server.IsNull() && server.HasAuthority()) {
             ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-            int remotePlayers = 0;
+            int remote = 0;
             for (int i = 0; i < pris.Count(); ++i) {
                 PriWrapper pri = pris.Get(i);
-                if (pri.IsNull()) continue;
-                if (!pri.IsLocalPlayerPRI()) remotePlayers++;
+                if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
             }
-
-            if (remotePlayers > 0) {
-                cvarManager->log("HostWorkshopMaps: LAN host detected — "
-                    + std::to_string(remotePlayers) + " remote player(s). Scheduling teleport.");
-                isHostingLAN_        = true;
-                pendingMapPath_       = path;
-                pendingLANTransport_  = true;
-                transportCountdown_   = LAN_TRANSPORT_DELAY_TICKS;
-                return; // actual travel issued by OnTick
+            if (remote > 0) {
+                SetStatus("LAN host — teleporting " + std::to_string(remote) + " player(s)...");
+                pendingMapPath_      = path;
+                pendingLANTransport_ = true;
+                transportCountdown_  = 60;
+                return;
             }
         }
     }
 
-    // ── Single-player / freeplay / offline load ───────────────────────
-    // Use the BakkesMod loadmap console command which handles UE3 map loading
-    // Format: TAGame.GFxShell_TA.LoadMap|<path>
-    std::string cmd = "load_workshop_map \"" + path + "\"";
-    cvarManager->log("HostWorkshopMaps: issuing: " + cmd);
-    gameWrapper->ExecuteUnrealCommand("open \"" + path + "\"");
+    // BakkesMod's load_workshop_map command is the correct way to load
+    // .upk / .udk files — it handles the Unreal package mounting that
+    // a bare "open" command does not do.
+    cvarManager->executeCommand("load_workshop_map "" + path + """, false);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  TeleportLANPlayers – called by the tick handler after the delay
-// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::TeleportLANPlayers(const std::string& mapPath)
 {
-    if (!gameWrapper->IsInGame()) {
-        cvarManager->log("HostWorkshopMaps: TeleportLANPlayers — not in game, aborting");
-        return;
-    }
-
+    if (!gameWrapper->IsInGame()) return;
     ServerWrapper server = gameWrapper->GetCurrentGameState();
-    if (server.IsNull()) {
-        cvarManager->log("HostWorkshopMaps: TeleportLANPlayers — server null, aborting");
-        return;
-    }
-    if (!server.HasAuthority()) {
-        cvarManager->log("HostWorkshopMaps: TeleportLANPlayers — no authority, aborting");
-        return;
-    }
-
-    cvarManager->log("HostWorkshopMaps: TeleportLANPlayers — ServerTravel to: " + mapPath);
-
-    // ServerTravel is the Unreal Engine 3 mechanism that migrates ALL connected
-    // clients to a new map while keeping them in the same session.
-    // We use ExecuteUnrealCommand so it runs on the game thread.
+    if (server.IsNull() || !server.HasAuthority()) return;
+    SetStatus("ServerTravel → " + MapNameFromPath(mapPath));
     gameWrapper->ExecuteUnrealCommand("servertravel \"" + mapPath + "\"");
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  OnTick – drains the pending LAN transport countdown
-// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::OnTick(std::string)
 {
     if (!pendingLANTransport_) return;
-
-    --transportCountdown_;
-    if (transportCountdown_ > 0) return;
-
-    // Countdown expired – fire the travel
+    if (--transportCountdown_ > 0) return;
     pendingLANTransport_ = false;
-    isHostingLAN_        = false;
     TeleportLANPlayers(pendingMapPath_);
     pendingMapPath_.clear();
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-//  ImGui window (F2 > Plugins > Host Workshop Maps)
+//  ImGui standalone window
 // ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 {
@@ -349,27 +243,37 @@ void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 
 void HostWorkshopMaps::Render()
 {
-    // ── Header / directory ─────────────────────────────────────────────
-    ImGui::TextDisabled("Maps directory:");
-    ImGui::SameLine();
-    ImGui::TextWrapped("%s", mapsDirectory_.c_str());
+    if (!isWindowOpen_) return;
 
-    if (ImGui::Button("  Scan / Refresh  "))
-    {
+    // ── Window setup ───────────────────────────────────────────────────
+    ImGui::SetNextWindowSize(ImVec2(620, 540), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowBgAlpha(0.92f);
+
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoCollapse;
+    if (!ImGui::Begin("Host Workshop Maps", &isWindowOpen_, flags)) {
+        ImGui::End();
+        return;
+    }
+
+    // ── Directory bar ──────────────────────────────────────────────────
+    ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - 130);
+    if (ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), ImGuiInputTextFlags_EnterReturnsTrue)) {
+        cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
+    }
+    ImGui::PopItemWidth();
+    ImGui::SameLine();
+    if (ImGui::Button("Apply", ImVec2(60, 0)))
+        cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
+    ImGui::SameLine();
+    if (ImGui::Button("Scan", ImVec2(55, 0)))
         ScanMaps();
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("  Open Folder  "))
-    {
-        // Open in Explorer
-        std::string cmd = "explorer \"" + mapsDirectory_ + "\"";
-        system(cmd.c_str()); // harmless Windows-only call
-    }
 
-    ImGui::Separator();
+    ImGui::Spacing();
 
-    // ── Search filter ──────────────────────────────────────────────────
-    if (ImGui::InputText("Search", filterBuf_, sizeof(filterBuf_)))
+    // ── Search box ─────────────────────────────────────────────────────
+    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+    if (ImGui::InputTextWithHint("##filter", "Search maps...", filterBuf_, sizeof(filterBuf_)))
         filterText_ = filterBuf_;
 
     ImGui::Spacing();
@@ -377,128 +281,86 @@ void HostWorkshopMaps::Render()
     // ── Map list ───────────────────────────────────────────────────────
     auto filtered = FilteredMaps();
 
-    if (filtered.empty())
-    {
-        ImGui::TextColored(ImVec4(1,0.4f,0.4f,1),
-            mapList_.empty()
-                ? "No maps found. Make sure the directory is correct and click Scan."
-                : "No maps match the filter.");
-    }
-    else
-    {
-        ImGui::Text("%d map(s)", (int)filtered.size());
-        ImGui::Separator();
+    float listHeight = ImGui::GetContentRegionAvail().y - 90;
+    ImGui::BeginChild("##maplist", ImVec2(0, listHeight), true);
 
-        // Scrollable child region so the list doesn't push the buttons off-screen
-        ImGui::BeginChild("##maplist", ImVec2(0, 300), true);
-
-        for (int i = 0; i < (int)filtered.size(); ++i)
-        {
+    if (filtered.empty()) {
+        ImGui::Spacing();
+        ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - 280) * 0.5f);
+        if (mapList_.empty())
+            ImGui::TextDisabled("No maps found. Set your directory and click Scan.");
+        else
+            ImGui::TextDisabled("No maps match your search.");
+    } else {
+        for (int i = 0; i < (int)filtered.size(); ++i) {
             auto& m = filtered[i];
             bool sel = (selectedIndex_ == i);
 
-            // Tag .udk vs .upk
-            std::string label = m.displayName + "  [" + m.extension + "]";
-            if (ImGui::Selectable(label.c_str(), sel))
+            // Highlight selected row
+            if (sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.6f, 1.0f, 0.4f));
+
+            std::string label = m.displayName + "  ##" + std::to_string(i);
+            if (ImGui::Selectable(label.c_str(), sel, ImGuiSelectableFlags_AllowDoubleClick)) {
                 selectedIndex_ = i;
+                // Double-click = load immediately
+                if (ImGui::IsMouseDoubleClicked(0))
+                    LoadMap(filtered[i]);
+            }
+
+            if (sel) ImGui::PopStyleColor();
+
+            // Extension tag on the right
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 35);
+            ImGui::TextDisabled(".%s", m.extension.c_str());
 
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", m.fullPath.c_str());
         }
-
-        ImGui::EndChild();
-
-        // ── Load button ────────────────────────────────────────────────
-        ImGui::Spacing();
-
-        bool canLoad = (selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size());
-
-        if (!canLoad) ImGui::BeginDisabled();
-        if (ImGui::Button("  Load Selected Map  ", ImVec2(200, 0)))
-        {
-            LoadMap(filtered[selectedIndex_]);
-        }
-        if (!canLoad) ImGui::EndDisabled();
-
-        if (canLoad)
-        {
-            ImGui::SameLine();
-            ImGui::TextDisabled("%s", filtered[selectedIndex_].fullPath.c_str());
-        }
     }
 
-    ImGui::Separator();
-
-    // ── LAN status indicator ───────────────────────────────────────────
-    if (pendingLANTransport_)
-    {
-        ImGui::TextColored(ImVec4(1, 0.8f, 0, 1),
-            "Teleporting LAN players in %d ticks...", transportCountdown_);
-    }
-    else
-    {
-        // Show live LAN hosting status
-        bool inGame = gameWrapper->IsInGame();
-        if (inGame)
-        {
-            ServerWrapper server = gameWrapper->GetCurrentGameState();
-            if (!server.IsNull() && server.HasAuthority())
-            {
-                ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-                int remote = 0;
-                for (int i = 0; i < pris.Count(); ++i) {
-                    PriWrapper pri = pris.Get(i);
-                    if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
-                }
-                if (remote > 0)
-                    ImGui::TextColored(ImVec4(0.2f,1,0.4f,1),
-                        "LAN host  |  %d remote player(s) connected  —  load will teleport all", remote);
-                else
-                    ImGui::TextColored(ImVec4(0.6f,0.6f,0.6f,1),
-                        "Hosting (no remote players yet)");
-            }
-            else if (inGame)
-            {
-                ImGui::TextDisabled("In game (not hosting)");
-            }
-        }
-        else
-        {
-            ImGui::TextDisabled("Not in a game");
-        }
-    }
+    ImGui::EndChild();
 
     ImGui::Spacing();
 
-    // ── Settings ───────────────────────────────────────────────────────
-    if (ImGui::CollapsingHeader("Settings"))
-    {
-        // Directory picker (text box)
-        static char dirBuf[512] = {};
-        if (dirBuf[0] == '\0')
-            strncpy_s(dirBuf, mapsDirectory_.c_str(), sizeof(dirBuf)-1);
+    // ── Bottom bar ─────────────────────────────────────────────────────
+    bool canLoad = (selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size());
 
-        ImGui::Text("Maps Directory:");
-        if (ImGui::InputText("##dir", dirBuf, sizeof(dirBuf),
-                ImGuiInputTextFlags_EnterReturnsTrue))
-        {
-            cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf));
+    if (!canLoad) ImGui::BeginDisabled();
+    if (ImGui::Button("Load Map", ImVec2(120, 0)) && canLoad)
+        LoadMap(filtered[selectedIndex_]);
+    if (!canLoad) ImGui::EndDisabled();
+
+    ImGui::SameLine();
+
+    // LAN status chip
+    bool inGame = gameWrapper->IsInGame();
+    if (pendingLANTransport_) {
+        ImGui::TextColored(ImVec4(1,0.8f,0,1), "Teleporting LAN players... (%d)", transportCountdown_);
+    } else if (inGame) {
+        ServerWrapper server = gameWrapper->GetCurrentGameState();
+        if (!server.IsNull() && server.HasAuthority()) {
+            ArrayWrapper<PriWrapper> pris = server.GetPRIs();
+            int remote = 0;
+            for (int i = 0; i < pris.Count(); ++i) {
+                PriWrapper pri = pris.Get(i);
+                if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
+            }
+            if (remote > 0)
+                ImGui::TextColored(ImVec4(0.2f,1,0.5f,1), "LAN host  |  %d player(s) connected", remote);
+            else
+                ImGui::TextColored(ImVec4(0.6f,0.6f,0.6f,1), "Hosting (no guests yet)");
         }
-        ImGui::SameLine();
-        if (ImGui::Button("Apply##dir"))
-            cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf));
-
-        ImGui::Spacing();
-        bool autoScan = autoScanOnOpen_;
-        if (ImGui::Checkbox("Auto-scan on panel open", &autoScan))
-            cvarManager->getCvar("hwm_auto_scan").setValue(autoScan ? 1 : 0);
-
-        ImGui::Spacing();
-        ImGui::TextDisabled("Console commands:");
-        ImGui::BulletText("hwm_scan                – re-scan maps folder");
-        ImGui::BulletText("hwm_list                – list maps in console");
-        ImGui::BulletText("hwm_load_index <n>      – load map by list index");
-        ImGui::BulletText("hwm_load_path <path>    – load map by full path");
-        ImGui::BulletText("hwm_maps_directory <p>  – set maps folder");
     }
+
+    // Map count
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 80);
+    ImGui::TextDisabled("%d map(s)", (int)filtered.size());
+
+    ImGui::Spacing();
+
+    // Status bar
+    if (!statusMsg_.empty())
+        ImGui::TextColored(ImVec4(0.7f,0.7f,0.7f,1), "%s", statusMsg_.c_str());
+
+    ImGui::End();
 }
