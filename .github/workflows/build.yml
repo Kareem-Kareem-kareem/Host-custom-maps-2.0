@@ -40,11 +40,37 @@ jobs:
           }
           Write-Host "SDK layout OK"
 
+      - name: Cache ImGui
+        id: cache-imgui
+        uses: actions/cache@v4
+        with:
+          path: third_party/imgui
+          key: imgui-v1.89.9
+
+      - name: Download ImGui
+        if: steps.cache-imgui.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/ocornut/imgui/archive/refs/tags/v1.89.9.zip" -OutFile imgui.zip
+          Expand-Archive imgui.zip -DestinationPath imgui-raw
+          New-Item -ItemType Directory -Force -Path third_party
+          Move-Item imgui-raw/imgui-1.89.9 third_party/imgui
+
+      - name: Verify ImGui layout
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "third_party/imgui/imgui.h")) {
+            Write-Error "ImGui headers missing"
+            exit 1
+          }
+          Write-Host "ImGui layout OK"
+
       - name: Configure CMake
         shell: pwsh
         run: |
           cmake -B build -S . `
             -DBAKKESMOD_SDK="${{ github.workspace }}/bakkesmod-sdk" `
+            -DIMGUI_DIR="${{ github.workspace }}/third_party/imgui" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
