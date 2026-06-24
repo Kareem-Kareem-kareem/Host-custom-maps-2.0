@@ -7,9 +7,8 @@
 #include <algorithm>
 #include <cctype>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.5", PLUGINTYPE_FREEPLAY)
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.6", PLUGINTYPE_FREEPLAY)
 
-// Path utilities (unchanged)
 std::string HostWorkshopMaps::DefaultWorkshopPath()
 {
     const char* appdata = std::getenv("APPDATA");
@@ -65,59 +64,31 @@ void HostWorkshopMaps::onLoad()
 {
     if (!cvarManager || !gameWrapper) return;
 
-    cvarManager->log("HostWorkshopMaps: loading v1.5 (fixed command + stability)");
+    cvarManager->log("HostWorkshopMaps v1.6 loading...");
 
     std::string defPath = DefaultWorkshopPath();
 
-    cvarManager->registerCvar("hwm_maps_directory", defPath, "Folder to scan for .upk/.udk workshop maps", true)
+    cvarManager->registerCvar("hwm_maps_directory", defPath, "Workshop maps folder", true)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
             strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
-            if (gameWrapper) gameWrapper->SetTimeout([this](GameWrapper*) { ScanMaps(); }, 0.5f);
+            ScanMaps();
         });
 
     mapsDirectory_ = SanitizePath(cvarManager->getCvar("hwm_maps_directory").getStringValue());
     strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
 
-    cvarManager->registerCvar("hwm_auto_scan", "1", "Auto-scan on open", true, true, 0, true, 1)
-        .addOnValueChanged([this](std::string, CVarWrapper cv) {
-            autoScanOnOpen_ = cv.getBoolValue();
-        });
-    autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
-
-    // Console commands
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) { ScanMaps(); }, "Scan maps", PERMISSION_ALL);
     cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>) {
         if (cvarManager) cvarManager->executeCommand("togglemenu hostworkshopmaps");
-    }, "Toggle window", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) { ScanMaps(); }, "Scan maps", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_load_index", [this](std::vector<std::string> args) {
-        if (args.size() < 2) return;
-        try {
-            int idx = std::stoi(args[1]);
-            if (idx >= 0 && idx < (int)mapList_.size()) LoadMap(mapList_[idx]);
-        } catch (...) {}
-    }, "Load by index", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_load_path", [this](std::vector<std::string> args) {
-        if (args.size() < 2) return;
-        std::string path;
-        for (size_t i = 1; i < args.size(); ++i) { if (i > 1) path += " "; path += args[i]; }
-        LoadMapPath(SanitizePath(path));
-    }, "Load by path", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>) {
-        for (int i = 0; i < (int)mapList_.size(); ++i)
-            if (cvarManager) cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName);
-    }, "List maps", PERMISSION_ALL);
+    }, "Toggle GUI", PERMISSION_ALL);
 
     gameWrapper->SetTimeout([this](GameWrapper*) {
-        if (autoScanOnOpen_) ScanMaps();
-        SetStatus("Ready — " + std::to_string(mapList_.size()) + " maps found");
-    }, 2.5f);
+        ScanMaps();
+        SetStatus("Ready - " + std::to_string(mapList_.size()) + " maps");
+    }, 2.0f);
 
-    cvarManager->log("HostWorkshopMaps: loaded successfully");
+    cvarManager->log("HostWorkshopMaps loaded");
 }
 
 void HostWorkshopMaps::onUnload() {}
@@ -127,10 +98,16 @@ void HostWorkshopMaps::ScanMaps()
     mapList_.clear();
     selectedIndex_ = -1;
 
-    if (mapsDirectory_.empty()) { SetStatus("Maps directory not set"); return; }
+    if (mapsDirectory_.empty()) {
+        SetStatus("No directory set");
+        return;
+    }
 
     fs::path dir(mapsDirectory_);
-    if (!fs::exists(dir)) { SetStatus("Directory not found: " + mapsDirectory_); return; }
+    if (!fs::exists(dir)) {
+        SetStatus("Directory not found");
+        return;
+    }
 
     try {
         for (auto& entry : fs::recursive_directory_iterator(dir, fs::directory_options::skip_permission_denied)) {
@@ -139,14 +116,14 @@ void HostWorkshopMaps::ScanMaps()
             std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char c){ return std::tolower(c); });
             if (ext == ".upk" || ext == ".udk") {
                 MapEntry me;
-                me.extension   = ext.substr(1);
-                me.fullPath    = SanitizePath(entry.path().string());
+                me.extension = ext.substr(1);
+                me.fullPath = SanitizePath(entry.path().string());
                 me.displayName = MapNameFromPath(me.fullPath);
                 mapList_.push_back(me);
             }
         }
-    } catch (const std::exception& ex) {
-        SetStatus("Scan error: " + std::string(ex.what()));
+    } catch (...) {
+        SetStatus("Scan failed");
         return;
     }
 
@@ -159,46 +136,14 @@ void HostWorkshopMaps::LoadMap(const MapEntry& entry) { LoadMapPath(entry.fullPa
 void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
     if (path.empty() || !fs::exists(fs::path(path))) {
-        SetStatus("Map not found: " + path);
+        SetStatus("Map not found");
         return;
     }
 
-    SetStatus("Loading: " + MapNameFromPath(path));
+    SetStatus("Loading " + MapNameFromPath(path));
 
-    try {
-        if (gameWrapper && gameWrapper->IsInGame()) {
-            ServerWrapper server = gameWrapper->GetCurrentGameState();
-            if (!server.IsNull() && server.HasAuthority()) {
-                int remote = 0;
-                ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-                for (int i = 0; i < pris.Count(); ++i) {
-                    PriWrapper pri = pris.Get(i);
-                    if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
-                }
-                if (remote > 0) {
-                    pendingMapPath_ = path;
-                    pendingLANTransport_ = true;
-                    TeleportLANPlayers(path);
-                    return;
-                }
-            }
-        }
-    } catch (...) {}
-
-    // Correct command
-    if (cvarManager) cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
-}
-
-void HostWorkshopMaps::TeleportLANPlayers(const std::string& mapPath)
-{
-    try {
-        if (!gameWrapper || !gameWrapper->IsInGame()) return;
-        ServerWrapper server = gameWrapper->GetCurrentGameState();
-        if (server.IsNull() || !server.HasAuthority()) return;
-        gameWrapper->ExecuteUnrealCommand("servertravel \"" + mapPath + "\"");
-        SetStatus("ServerTravel executed");
-    } catch (...) {
-        SetStatus("ServerTravel failed");
+    if (cvarManager) {
+        cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
     }
 }
 
@@ -212,100 +157,54 @@ void HostWorkshopMaps::Render()
     if (!isWindowOpen_) return;
 
     ImGui::SetNextWindowSize(ImVec2(620, 540), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowBgAlpha(0.92f);
-
     if (!ImGui::Begin("Host Workshop Maps", &isWindowOpen_, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End();
         return;
     }
 
-    // UI code (same as before)
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - 130);
     if (ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), ImGuiInputTextFlags_EnterReturnsTrue)) {
         if (cvarManager) cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
     }
     ImGui::PopItemWidth();
     ImGui::SameLine();
-    if (ImGui::Button("Apply", ImVec2(60, 0)) && cvarManager)
-        cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
+    if (ImGui::Button("Apply")) if (cvarManager) cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
     ImGui::SameLine();
-    if (ImGui::Button("Scan", ImVec2(55, 0)))
-        ScanMaps();
+    if (ImGui::Button("Scan")) ScanMaps();
 
     ImGui::Spacing();
 
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    if (ImGui::InputTextWithHint("##filter", "Search maps...", filterBuf_, sizeof(filterBuf_)))
+    if (ImGui::InputTextWithHint("##filter", "Search...", filterBuf_, sizeof(filterBuf_)))
         filterText_ = filterBuf_;
 
     ImGui::Spacing();
 
     auto filtered = FilteredMaps();
-    float listHeight = ImGui::GetContentRegionAvail().y - 110;
-    ImGui::BeginChild("##maplist", ImVec2(0, listHeight), true);
+    ImGui::BeginChild("##list", ImVec2(0, ImGui::GetContentRegionAvail().y - 100), true);
 
     if (filtered.empty()) {
-        ImGui::Spacing();
-        ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - 280) * 0.5f);
-        ImGui::TextDisabled(mapList_.empty() ? "No maps found. Set directory and click Scan." : "No maps match your search.");
+        ImGui::TextDisabled("No maps found or no match.");
     } else {
         for (int i = 0; i < (int)filtered.size(); ++i) {
             auto& m = filtered[i];
             bool sel = (selectedIndex_ == i);
-
-            if (sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.6f, 1.0f, 0.4f));
-
-            std::string label = m.displayName + "  ##" + std::to_string(i);
-            if (ImGui::Selectable(label.c_str(), sel, ImGuiSelectableFlags_AllowDoubleClick)) {
+            if (sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.6f, 1.0f, 0.5f));
+            if (ImGui::Selectable((m.displayName + "  ##" + std::to_string(i)).c_str(), sel, ImGuiSelectableFlags_AllowDoubleClick)) {
                 selectedIndex_ = i;
-                if (ImGui::IsMouseDoubleClicked(0))
-                    LoadMap(filtered[i]);
+                if (ImGui::IsMouseDoubleClicked(0)) LoadMap(m);
             }
-
             if (sel) ImGui::PopStyleColor();
-
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 35);
-            ImGui::TextDisabled(".%s", m.extension.c_str());
-
-            if (ImGui::IsItemHovered())
-                ImGui::SetTooltip("%s", m.fullPath.c_str());
         }
     }
     ImGui::EndChild();
 
-    ImGui::Spacing();
-
-    bool canLoad = (selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size());
-    if (!canLoad) ImGui::BeginDisabled();
-    if (ImGui::Button("Load Map", ImVec2(120, 0)) && canLoad)
+    if (ImGui::Button("Load Selected", ImVec2(150, 0)) && selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size())
         LoadMap(filtered[selectedIndex_]);
-    if (!canLoad) ImGui::EndDisabled();
 
     ImGui::SameLine();
+    ImGui::TextDisabled("%d maps", (int)filtered.size());
 
-    if (pendingLANTransport_) {
-        ImGui::TextColored(ImVec4(1,0.8f,0,1), "Teleporting LAN players...");
-    } else if (gameWrapper && gameWrapper->IsInGame()) {
-        try {
-            ServerWrapper server = gameWrapper->GetCurrentGameState();
-            if (!server.IsNull() && server.HasAuthority()) {
-                int remote = 0;
-                ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-                for (int i = 0; i < pris.Count(); ++i) {
-                    PriWrapper pri = pris.Get(i);
-                    if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
-                }
-                if (remote > 0)
-                    ImGui::TextColored(ImVec4(0.2f,1,0.5f,1), "LAN host | %d players", remote);
-            }
-        } catch (...) {}
-    }
-
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 80);
-    ImGui::TextDisabled("%d map(s)", (int)filtered.size());
-
-    ImGui::Spacing();
     if (!statusMsg_.empty())
         ImGui::TextColored(ImVec4(0.7f,0.7f,0.7f,1), "%s", statusMsg_.c_str());
 
