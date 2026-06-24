@@ -90,3 +90,4 @@ You can override with `wml_maps_directory <path>` or via the Settings section in
 |---|---|
 | `.upk` | Unreal Package — most Steam Workshop maps |
 | `.udk` | Unreal Development Kit package — older community maps |
+
