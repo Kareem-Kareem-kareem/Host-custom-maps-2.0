@@ -7,57 +7,53 @@
 
 namespace fs = std::filesystem;
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  Map entry: one .upk / .udk file found on disk
-// ─────────────────────────────────────────────────────────────────────────────
 struct MapEntry {
-    std::string displayName;   // filename without extension
-    std::string fullPath;      // absolute path with forward slashes
-    std::string extension;     // "upk" or "udk"
+    std::string displayName;
+    std::string fullPath;
+    std::string extension;
 };
 
-// ─────────────────────────────────────────────────────────────────────────────
-//  HostWorkshopMaps
-//  - Scans a configurable folder (default: Steam Workshop maps dir) for
-//    .upk / .udk files
-//  - Loads any chosen map as freeplay / training (works offline & LAN)
-//  - When the host loads a map while a LAN game is active it teleports all
-//    connected players to the new map automatically
-// ─────────────────────────────────────────────────────────────────────────────
 class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
                           public BakkesMod::Plugin::PluginWindow
 {
 public:
-    // ── BakkesMod lifecycle ───────────────────────────────────────────────
     void onLoad()   override;
     void onUnload() override;
 
-    // ── PluginWindow (ImGui F2 panel) ────────────────────────────────────
+    // ── PluginWindow ─────────────────────────────────────────────────────
     void        Render()       override;
     std::string GetMenuName()  override { return "hostworkshopmaps"; }
     std::string GetMenuTitle() override { return "Host Workshop Maps"; }
     void        SetImGuiContext(uintptr_t ctx) override;
-    bool        ShouldBlockInput()  override { return false; }
-    bool        IsActiveOverlay()   override { return false; }
-    void        OnOpen()  override {}
-    void        OnClose() override {}
+    bool        ShouldBlockInput()  override { return isWindowOpen_; }
+    bool        IsActiveOverlay()   override { return isWindowOpen_; }
+    void        OnOpen()  override { isWindowOpen_ = true;  }
+    void        OnClose() override { isWindowOpen_ = false; }
 
 private:
+    // ── Window state ─────────────────────────────────────────────────────
+    bool isWindowOpen_ = false;
+
     // ── Map list ─────────────────────────────────────────────────────────
     std::vector<MapEntry> mapList_;
-    int                   selectedIndex_  = -1;
-    std::string           filterText_;          // ImGui search box buffer
-    char                  filterBuf_[256]  = {};
+    int                   selectedIndex_ = -1;
+    char                  filterBuf_[256] = {};
+    std::string           filterText_;
+
+    // ── Directory input buffer ────────────────────────────────────────────
+    char dirBuf_[512] = {};
 
     // ── CVar-backed settings ─────────────────────────────────────────────
-    std::string mapsDirectory_;  // from cvar hwm_maps_directory
-    bool        autoScanOnOpen_; // from cvar hwm_auto_scan
+    std::string mapsDirectory_;
+    bool        autoScanOnOpen_ = true;
 
     // ── LAN state ────────────────────────────────────────────────────────
-    bool isHostingLAN_        = false;
-    bool pendingLANTransport_ = false;
+    bool        pendingLANTransport_ = false;
     std::string pendingMapPath_;
-    int         transportCountdown_ = 0; // ticks before we issue the travel
+    int         transportCountdown_  = 0;
+
+    // ── Status message (shown at bottom of window) ───────────────────────
+    std::string statusMsg_;
 
     // ── Helpers ──────────────────────────────────────────────────────────
     void ScanMaps();
@@ -65,6 +61,7 @@ private:
     void LoadMapPath(const std::string& path);
     void TeleportLANPlayers(const std::string& mapPath);
     void OnTick(std::string eventName);
+    void SetStatus(const std::string& msg);
 
     static std::string DefaultWorkshopPath();
     static std::string SanitizePath(const std::string& raw);
