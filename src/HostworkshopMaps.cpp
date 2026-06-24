@@ -103,11 +103,26 @@ void HostWorkshopMaps::onLoad()
         ScanMaps();
     }, "Scan maps directory", PERMISSION_ALL);
 
-    cvarManager->registerNotifier("hwm_load_index", [this](std::vector<std::string> args) {
-        if (args.size() < 2) return;
-        int idx = std::stoi(args[1]);
-        if (idx >= 0 && idx < (int)mapList_.size()) LoadMap(mapList_[idx]);
-    }, "Load map by index", PERMISSION_ALL);
+cvarManager->registerNotifier("hwm_load_index", [this](std::vector<std::string> args) {
+    if (args.size() < 2)
+        return;
+
+    int idx = -1;
+
+    try
+    {
+        idx = std::stoi(args[1]);
+    }
+    catch (...)
+    {
+        SetStatus("Invalid map index");
+        return;
+    }
+
+    if (idx >= 0 && idx < static_cast<int>(mapList_.size()))
+        LoadMap(mapList_[idx]);
+
+}, "Load map by index", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_load_path", [this](std::vector<std::string> args) {
         if (args.size() < 2) return;
@@ -193,12 +208,19 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
     if (inGame) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-            int remote = 0;
-            for (int i = 0; i < pris.Count(); ++i) {
-                PriWrapper pri = pris.Get(i);
-                if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
-            }
+ArrayWrapper<PriWrapper> pris = server.GetPRIs();
+int remote = 0;
+
+for (int i = 0; i < pris.Count(); ++i)
+{
+    auto pri = pris.Get(i);
+
+    if (!pri.memory_address)
+        continue;
+
+    if (!pri.IsNull() && !pri.IsLocalPlayerPRI())
+        remote++;
+}
             if (remote > 0) {
                 SetStatus("LAN host — teleporting " + std::to_string(remote) + " player(s)...");
                 pendingMapPath_      = path;
@@ -212,16 +234,36 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
     // BakkesMod's load_workshop_map command is the correct way to load
     // .upk / .udk files — it handles the Unreal package mounting that
     // a bare "open" command does not do.
-    cvarManager->executeCommand("load_workshop_map "" + path + """, false);
+try
+{
+    cvarManager->executeCommand(
+        "load_workshop_map \"" + path + "\"",
+        false
+    );
 }
+catch (...)
+{
+    SetStatus("Failed to load map");
+}}
 
 void HostWorkshopMaps::TeleportLANPlayers(const std::string& mapPath)
 {
-    if (!gameWrapper->IsInGame()) return;
-    ServerWrapper server = gameWrapper->GetCurrentGameState();
-    if (server.IsNull() || !server.HasAuthority()) return;
-    SetStatus("ServerTravel → " + MapNameFromPath(mapPath));
-    gameWrapper->ExecuteUnrealCommand("servertravel \"" + mapPath + "\"");
+    if (mapPath.empty())
+        return;
+
+    SetStatus("Loading: " + MapNameFromPath(mapPath));
+
+    try
+    {
+        cvarManager->executeCommand(
+            "load_workshop_map \"" + mapPath + "\"",
+            false
+        );
+    }
+    catch (...)
+    {
+        SetStatus("Failed to load map");
+    }
 }
 
 void HostWorkshopMaps::OnTick(std::string)
@@ -339,12 +381,19 @@ void HostWorkshopMaps::Render()
     } else if (inGame) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-            int remote = 0;
-            for (int i = 0; i < pris.Count(); ++i) {
-                PriWrapper pri = pris.Get(i);
-                if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
-            }
+ArrayWrapper<PriWrapper> pris = server.GetPRIs();
+int remote = 0;
+
+for (int i = 0; i < pris.Count(); ++i)
+{
+    auto pri = pris.Get(i);
+
+    if (!pri.memory_address)
+        continue;
+
+    if (!pri.IsNull() && !pri.IsLocalPlayerPRI())
+        remote++;
+}
             if (remote > 0)
                 ImGui::TextColored(ImVec4(0.2f,1,0.5f,1), "LAN host  |  %d player(s) connected", remote);
             else
