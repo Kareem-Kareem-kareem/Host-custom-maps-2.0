@@ -1,4 +1,5 @@
 #include "HostworkshopMaps.h"
+#include "imgui.h"          // ← ADD THIS LINE
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/GameEvent/ServerWrapper.h"
 #include "imgui.h"
