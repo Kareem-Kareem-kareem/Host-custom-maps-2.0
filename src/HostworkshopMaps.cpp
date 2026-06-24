@@ -68,7 +68,7 @@ void HostWorkshopMaps::onLoad()
 
     std::string defPath = DefaultWorkshopPath();
 
-    cvarManager->registerCvar("hwm_maps_directory", defPath, "Workshop maps folder", true)
+    cvarManager->registerCvar("hwm_maps_directory", defPath, "Maps folder", true)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
             strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
@@ -78,7 +78,7 @@ void HostWorkshopMaps::onLoad()
     mapsDirectory_ = SanitizePath(cvarManager->getCvar("hwm_maps_directory").getStringValue());
     strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
 
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) { ScanMaps(); }, "Scan maps", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) { ScanMaps(); }, "Scan", PERMISSION_ALL);
     cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>) {
         if (cvarManager) cvarManager->executeCommand("togglemenu hostworkshopmaps");
     }, "Toggle GUI", PERMISSION_ALL);
@@ -88,7 +88,7 @@ void HostWorkshopMaps::onLoad()
         SetStatus("Ready - " + std::to_string(mapList_.size()) + " maps");
     }, 2.0f);
 
-    cvarManager->log("HostWorkshopMaps loaded");
+    cvarManager->log("HostWorkshopMaps loaded successfully");
 }
 
 void HostWorkshopMaps::onUnload() {}
@@ -123,7 +123,7 @@ void HostWorkshopMaps::ScanMaps()
             }
         }
     } catch (...) {
-        SetStatus("Scan failed");
+        SetStatus("Scan error");
         return;
     }
 
@@ -136,12 +136,13 @@ void HostWorkshopMaps::LoadMap(const MapEntry& entry) { LoadMapPath(entry.fullPa
 void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
     if (path.empty() || !fs::exists(fs::path(path))) {
-        SetStatus("Map not found");
+        SetStatus("Map file not found");
         return;
     }
 
-    SetStatus("Loading " + MapNameFromPath(path));
+    SetStatus("Loading: " + MapNameFromPath(path));
 
+    // Correct command
     if (cvarManager) {
         cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
     }
@@ -168,42 +169,56 @@ void HostWorkshopMaps::Render()
     }
     ImGui::PopItemWidth();
     ImGui::SameLine();
-    if (ImGui::Button("Apply")) if (cvarManager) cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
+    if (ImGui::Button("Apply", ImVec2(60,0)) && cvarManager)
+        cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
     ImGui::SameLine();
-    if (ImGui::Button("Scan")) ScanMaps();
+    if (ImGui::Button("Scan", ImVec2(55,0)))
+        ScanMaps();
 
     ImGui::Spacing();
 
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
-    if (ImGui::InputTextWithHint("##filter", "Search...", filterBuf_, sizeof(filterBuf_)))
+    if (ImGui::InputTextWithHint("##filter", "Search maps...", filterBuf_, sizeof(filterBuf_)))
         filterText_ = filterBuf_;
 
     ImGui::Spacing();
 
     auto filtered = FilteredMaps();
-    ImGui::BeginChild("##list", ImVec2(0, ImGui::GetContentRegionAvail().y - 100), true);
+    float listHeight = ImGui::GetContentRegionAvail().y - 100;
+    ImGui::BeginChild("##maplist", ImVec2(0, listHeight), true);
 
     if (filtered.empty()) {
-        ImGui::TextDisabled("No maps found or no match.");
+        ImGui::TextDisabled(mapList_.empty() ? "No maps found. Set directory + Scan" : "No results");
     } else {
         for (int i = 0; i < (int)filtered.size(); ++i) {
             auto& m = filtered[i];
             bool sel = (selectedIndex_ == i);
-            if (sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.6f, 1.0f, 0.5f));
-            if (ImGui::Selectable((m.displayName + "  ##" + std::to_string(i)).c_str(), sel, ImGuiSelectableFlags_AllowDoubleClick)) {
+            if (sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f,0.6f,1.0f,0.4f));
+
+            std::string label = m.displayName + "  ##" + std::to_string(i);
+            if (ImGui::Selectable(label.c_str(), sel, ImGuiSelectableFlags_AllowDoubleClick)) {
                 selectedIndex_ = i;
-                if (ImGui::IsMouseDoubleClicked(0)) LoadMap(m);
+                if (ImGui::IsMouseDoubleClicked(0))
+                    LoadMap(m);
             }
             if (sel) ImGui::PopStyleColor();
+
+            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 40);
+            ImGui::TextDisabled(".%s", m.extension.c_str());
         }
     }
     ImGui::EndChild();
 
-    if (ImGui::Button("Load Selected", ImVec2(150, 0)) && selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size())
+    ImGui::Spacing();
+
+    bool canLoad = (selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size());
+    if (!canLoad) ImGui::BeginDisabled();
+    if (ImGui::Button("Load Selected Map", ImVec2(180, 0)) && canLoad)
         LoadMap(filtered[selectedIndex_]);
+    if (!canLoad) ImGui::EndDisabled();
 
     ImGui::SameLine();
-    ImGui::TextDisabled("%d maps", (int)filtered.size());
+    ImGui::TextDisabled("%d map(s)", (int)filtered.size());
 
     if (!statusMsg_.empty())
         ImGui::TextColored(ImVec4(0.7f,0.7f,0.7f,1), "%s", statusMsg_.c_str());
