@@ -1,4 +1,4 @@
-name: Build WorkshopMapLoader Plugin
+name: Build HostWorkshopMaps Plugin
 
 on:
   push:
@@ -81,9 +81,9 @@ jobs:
         id: locate
         shell: pwsh
         run: |
-          $dll = Get-ChildItem -Path build -Filter "WorkshopMapLoader.dll" -Recurse | Select-Object -First 1
+          $dll = Get-ChildItem -Path build -Filter "HostWorkshopMaps.dll" -Recurse | Select-Object -First 1
           if (-not $dll) {
-            Write-Error "WorkshopMapLoader.dll was not produced by the build"
+            Write-Error "HostWorkshopMaps.dll was not produced by the build"
             exit 1
           }
           Write-Host "Found: $($dll.FullName)"
@@ -92,10 +92,10 @@ jobs:
       - name: Upload artifact (dll + set file)
         uses: actions/upload-artifact@v4
         with:
-          name: WorkshopMapLoader-release
+          name: HostWorkshopMaps-release
           path: |
             ${{ steps.locate.outputs.dll_path }}
-            WorkshopMapLoader.set
+            HostWorkshopMaps.set
 
       - name: Attach to release
         if: github.event_name == 'release'
@@ -103,4 +103,4 @@ jobs:
         with:
           files: |
             ${{ steps.locate.outputs.dll_path }}
-            WorkshopMapLoader.set
+            HostWorkshopMaps.set
