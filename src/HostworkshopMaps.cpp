@@ -107,6 +107,7 @@ void HostWorkshopMaps::SetStatus(const std::string& msg) {
 // ═══════════════════════════════════════════════════════════════════
 
 void HostWorkshopMaps::onLoad() {
+        if (!cvarManager || !gameWrapper) return;  // ADD THIS LINE AT TOP
     if (!IsCVarManagerValid()) {
         return; // Cannot proceed without cvarManager
     }
