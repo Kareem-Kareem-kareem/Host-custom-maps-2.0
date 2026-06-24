@@ -10,9 +10,7 @@
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.5", PLUGINTYPE_FREEPLAY)
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Path utilities
-// ═══════════════════════════════════════════════════════════════════════════
+// Path utilities
 std::string HostWorkshopMaps::DefaultWorkshopPath()
 {
     const char* appdata = std::getenv("APPDATA");
@@ -64,14 +62,11 @@ void HostWorkshopMaps::SetStatus(const std::string& msg)
     if (cvarManager) cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  onLoad
-// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::onLoad()
 {
     if (!cvarManager || !gameWrapper) return;
 
-    cvarManager->log("HostWorkshopMaps: loading v1.5 (stability fixes)");
+    cvarManager->log("HostWorkshopMaps: loading v1.5 (crash-resistant)");
 
     std::string defPath = DefaultWorkshopPath();
 
@@ -145,9 +140,6 @@ void HostWorkshopMaps::StartTransportTimer()
     }, 0.5f);
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  Core functions
-// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::ScanMaps()
 {
     mapList_.clear();
@@ -236,9 +228,6 @@ void HostWorkshopMaps::OnTick(std::string)
     pendingMapPath_.clear();
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-//  ImGui Render
-// ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 {
     ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
