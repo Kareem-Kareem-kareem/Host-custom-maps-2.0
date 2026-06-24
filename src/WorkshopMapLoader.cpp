@@ -2,6 +2,7 @@
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/gameevent/serverwrapper.h"
 #include "bakkesmod/wrappers/engine/unrealstringwrapper.h"
+#include "bakkesmod/plugin/pluginwindow.h"
 #include "imgui.h"
 #include <algorithm>
 #include <sstream>
