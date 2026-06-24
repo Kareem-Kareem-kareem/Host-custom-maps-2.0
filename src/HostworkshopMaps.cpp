@@ -136,13 +136,12 @@ void HostWorkshopMaps::LoadMap(const MapEntry& entry) { LoadMapPath(entry.fullPa
 void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
     if (path.empty() || !fs::exists(fs::path(path))) {
-        SetStatus("Map file not found");
+        SetStatus("Map not found");
         return;
     }
 
     SetStatus("Loading: " + MapNameFromPath(path));
 
-    // Correct command
     if (cvarManager) {
         cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
     }
@@ -188,7 +187,7 @@ void HostWorkshopMaps::Render()
     ImGui::BeginChild("##maplist", ImVec2(0, listHeight), true);
 
     if (filtered.empty()) {
-        ImGui::TextDisabled(mapList_.empty() ? "No maps found. Set directory + Scan" : "No results");
+        ImGui::TextDisabled("No maps found. Set directory and click Scan.");
     } else {
         for (int i = 0; i < (int)filtered.size(); ++i) {
             auto& m = filtered[i];
@@ -202,9 +201,6 @@ void HostWorkshopMaps::Render()
                     LoadMap(m);
             }
             if (sel) ImGui::PopStyleColor();
-
-            ImGui::SameLine(ImGui::GetContentRegionAvail().x - 40);
-            ImGui::TextDisabled(".%s", m.extension.c_str());
         }
     }
     ImGui::EndChild();
