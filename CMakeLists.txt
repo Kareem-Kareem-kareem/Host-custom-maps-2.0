@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15)
-project(WorkshopMapLoader)
+project(HostWorkshopMaps)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,31 +37,31 @@ set(IMGUI_SOURCES
 )
 
 # ── Plugin target ────────────────────────────────────────────────────────────
-add_library(WorkshopMapLoader SHARED
-    src/WorkshopMapLoader.cpp
+add_library(HostWorkshopMaps SHARED
+    src/HostWorkshopMaps.cpp
     ${IMGUI_SOURCES}
 )
 
-target_include_directories(WorkshopMapLoader PRIVATE
+target_include_directories(HostWorkshopMaps PRIVATE
     ${BAKKESMOD_SDK}/include
     ${IMGUI_DIR}
     src
 )
 
-target_link_directories(WorkshopMapLoader PRIVATE
+target_link_directories(HostWorkshopMaps PRIVATE
     ${BAKKESMOD_SDK}/lib
 )
 
-target_link_libraries(WorkshopMapLoader PRIVATE
+target_link_libraries(HostWorkshopMaps PRIVATE
     pluginsdk
 )
 
 if(WIN32)
-    set_target_properties(WorkshopMapLoader PROPERTIES
+    set_target_properties(HostWorkshopMaps PROPERTIES
         SUFFIX ".dll"
         PREFIX ""
     )
-    target_compile_definitions(WorkshopMapLoader PRIVATE
+    target_compile_definitions(HostWorkshopMaps PRIVATE
         WIN32_LEAN_AND_MEAN
         NOMINMAX
         _CRT_SECURE_NO_WARNINGS
@@ -72,15 +72,15 @@ endif()
 if(DEFINED ENV{APPDATA} AND NOT DEFINED ENV{CI})
     set(BM_PLUGINS  "$ENV{APPDATA}/bakkesmod/bakkesmod/plugins")
     set(BM_SETTINGS "$ENV{APPDATA}/bakkesmod/bakkesmod/plugins/settings")
-    add_custom_command(TARGET WorkshopMapLoader POST_BUILD
+    add_custom_command(TARGET HostWorkshopMaps POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E make_directory "${BM_PLUGINS}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${BM_SETTINGS}"
         COMMAND ${CMAKE_COMMAND} -E copy
-            $<TARGET_FILE:WorkshopMapLoader>
-            "${BM_PLUGINS}/WorkshopMapLoader.dll"
+            $<TARGET_FILE:HostWorkshopMaps>
+            "${BM_PLUGINS}/HostWorkshopMaps.dll"
         COMMAND ${CMAKE_COMMAND} -E copy
-            "${CMAKE_SOURCE_DIR}/WorkshopMapLoader.set"
-            "${BM_SETTINGS}/WorkshopMapLoader.set"
+            "${CMAKE_SOURCE_DIR}/HostWorkshopMaps.set"
+            "${BM_SETTINGS}/HostWorkshopMaps.set"
     )
     message(STATUS "Will auto-copy built DLL + .set to BakkesMod plugins folder")
 endif()
