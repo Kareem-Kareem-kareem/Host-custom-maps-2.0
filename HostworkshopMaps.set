@@ -1,13 +1,13 @@
-Workshop Map Loader
+Host Workshop Maps
 9|Loads .upk / .udk Workshop maps in Freeplay, Custom Training, and LAN matches.
 9|When you are the LAN host, loading a map teleports ALL connected players automatically.
 8
 9|--- Directory ---
-6|Maps Directory|wml_maps_directory
-1|Auto-scan on open|wml_auto_scan
+6|Maps Directory|hwm_maps_directory
+1|Auto-scan on open|hwm_auto_scan
 8
 9|--- Actions ---
-0|Scan / Refresh map list|wml_scan
-0|List maps in console|wml_list
+0|Scan / Refresh map list|hwm_scan
+0|List maps in console|hwm_list
 8
 9|Open the F2 Plugins panel for the full GUI map browser.
