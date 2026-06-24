@@ -88,7 +88,6 @@ void HostWorkshopMaps::onLoad()
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
             strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
-            gameWrapper->SetTimeout([this](GameWrapper*) { ScanMaps(); }, 0.5f);
         });
     mapsDirectory_ = SanitizePath(cvarManager->getCvar("hwm_maps_directory").getStringValue());
     strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
@@ -155,21 +154,7 @@ cvarManager->registerNotifier("hwm_load_index", [this](std::vector<std::string> 
 //         OnTick(e);
 //     });
 
-gameWrapper->SetTimeout(
-    [this](GameWrapper*)
-    {
-        try
-        {
-            ScanMaps();
-        }
-        catch (...)
-        {
-        }
-    },
-    5.0f);
 
-    cvarManager->log("HostWorkshopMaps: loaded — open with 'hwm_toggle' or bind a key in BakkesMod");
-}
 
 void HostWorkshopMaps::onUnload()
 {
