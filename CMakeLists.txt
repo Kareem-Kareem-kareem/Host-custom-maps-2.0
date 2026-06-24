@@ -16,14 +16,36 @@ if(NOT EXISTS "${BAKKESMOD_SDK}/include/bakkesmod/plugin/bakkesmodplugin.h")
     )
 endif()
 
+# ── ImGui (vendored under third_party/imgui) ──────────────────────────────
+if(NOT DEFINED IMGUI_DIR)
+    set(IMGUI_DIR "${CMAKE_SOURCE_DIR}/third_party/imgui")
+endif()
+
+if(NOT EXISTS "${IMGUI_DIR}/imgui.h")
+    message(FATAL_ERROR 
+        "ImGui not found at '${IMGUI_DIR}'.\n"
+        "The CI workflow downloads it automatically.\n"
+        "For local builds: git clone https://github.com/ocornut/imgui third_party/imgui"
+    )
+endif()
+
+set(IMGUI_SOURCES
+    ${IMGUI_DIR}/imgui.cpp
+    ${IMGUI_DIR}/imgui_draw.cpp
+    ${IMGUI_DIR}/imgui_tables.cpp
+    ${IMGUI_DIR}/imgui_widgets.cpp
+)
+
 # ── Plugin target ──────────────────────────────────────────────────────────
 add_library(HostWorkshopMaps SHARED
     src/HostWorkshopMaps.cpp
     src/HostWorkshopMaps.h
+    ${IMGUI_SOURCES}
 )
 
 target_include_directories(HostWorkshopMaps PRIVATE
     ${BAKKESMOD_SDK}/include
+    ${IMGUI_DIR}
     src
 )
 
