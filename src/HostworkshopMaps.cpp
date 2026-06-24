@@ -61,7 +61,17 @@ std::vector<MapEntry> HostWorkshopMaps::FilteredMaps() const
 void HostWorkshopMaps::SetStatus(const std::string& msg)
 {
     statusMsg_ = msg;
-    cvarManager->log("HostWorkshopMaps: " + msg);
+
+    if (cvarManager)
+    {
+        try
+        {
+            cvarManager->log("HostWorkshopMaps: " + msg);
+        }
+        catch (...)
+        {
+        }
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -137,20 +147,32 @@ cvarManager->registerNotifier("hwm_load_index", [this](std::vector<std::string> 
     }, "List maps in console", PERMISSION_ALL);
 
     // Bind F4 to toggle by default (user can rebind in BM keybinds)
-    gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
-        [this](std::string e) { OnTick(e); });
+// Disabled because it can fire during loading and cause instability.
+// gameWrapper->HookEvent(
+//     "Function TAGame.Car_TA.SetVehicleInput",
+//     [this](std::string e)
+//     {
+//         OnTick(e);
+//     });
 
-    gameWrapper->SetTimeout([this](GameWrapper*) {
-        ScanMaps();
-        SetStatus("Ready — " + std::to_string(mapList_.size()) + " maps found");
-    }, 3.0f);
+gameWrapper->SetTimeout(
+    [this](GameWrapper*)
+    {
+        try
+        {
+            ScanMaps();
+        }
+        catch (...)
+        {
+        }
+    },
+    5.0f);
 
     cvarManager->log("HostWorkshopMaps: loaded — open with 'hwm_toggle' or bind a key in BakkesMod");
 }
 
 void HostWorkshopMaps::onUnload()
 {
-    gameWrapper->UnhookEvent("Function TAGame.Car_TA.SetVehicleInput");
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -268,10 +290,29 @@ void HostWorkshopMaps::TeleportLANPlayers(const std::string& mapPath)
 
 void HostWorkshopMaps::OnTick(std::string)
 {
-    if (!pendingLANTransport_) return;
-    if (--transportCountdown_ > 0) return;
+    if (!pendingLANTransport_)
+        return;
+
+    if (!gameWrapper)
+        return;
+
+    if (!gameWrapper->IsInGame())
+        return;
+
+    if (--transportCountdown_ > 0)
+        return;
+
     pendingLANTransport_ = false;
-    TeleportLANPlayers(pendingMapPath_);
+
+    try
+    {
+        TeleportLANPlayers(pendingMapPath_);
+    }
+    catch (...)
+    {
+        SetStatus("LAN transport failed");
+    }
+
     pendingMapPath_.clear();
 }
 
@@ -280,12 +321,23 @@ void HostWorkshopMaps::OnTick(std::string)
 // ═══════════════════════════════════════════════════════════════════════════
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 {
-    ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
+    if (ctx == 0)
+        return;
+
+    ImGui::SetCurrentContext(
+        reinterpret_cast<ImGuiContext*>(ctx));
 }
 
 void HostWorkshopMaps::Render()
 {
-    if (!isWindowOpen_) return;
+    if (!isWindowOpen_)
+        return;
+
+    if (!gameWrapper)
+        return;
+
+    if (!cvarManager)
+        return;
 
     // ── Window setup ───────────────────────────────────────────────────
     ImGui::SetNextWindowSize(ImVec2(620, 540), ImGuiCond_FirstUseEver);
