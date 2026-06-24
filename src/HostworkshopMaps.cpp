@@ -9,7 +9,7 @@
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.5", PLUGINTYPE_FREEPLAY)
 
-// Path utilities
+// Path utilities (unchanged)
 std::string HostWorkshopMaps::DefaultWorkshopPath()
 {
     const char* appdata = std::getenv("APPDATA");
@@ -65,12 +65,11 @@ void HostWorkshopMaps::onLoad()
 {
     if (!cvarManager || !gameWrapper) return;
 
-    cvarManager->log("HostWorkshopMaps: loading v1.5 (stability fixes)");
+    cvarManager->log("HostWorkshopMaps: loading v1.5 (fixed command + stability)");
 
     std::string defPath = DefaultWorkshopPath();
 
-    cvarManager->registerCvar("hwm_maps_directory", defPath,
-        "Folder to scan for .upk/.udk workshop maps", true)
+    cvarManager->registerCvar("hwm_maps_directory", defPath, "Folder to scan for .upk/.udk workshop maps", true)
         .addOnValueChanged([this](std::string, CVarWrapper cv) {
             mapsDirectory_ = SanitizePath(cv.getStringValue());
             strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
@@ -86,6 +85,7 @@ void HostWorkshopMaps::onLoad()
         });
     autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
 
+    // Console commands
     cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>) {
         if (cvarManager) cvarManager->executeCommand("togglemenu hostworkshopmaps");
     }, "Toggle window", PERMISSION_ALL);
@@ -120,9 +120,7 @@ void HostWorkshopMaps::onLoad()
     cvarManager->log("HostWorkshopMaps: loaded successfully");
 }
 
-void HostWorkshopMaps::onUnload()
-{
-}
+void HostWorkshopMaps::onUnload() {}
 
 void HostWorkshopMaps::ScanMaps()
 {
@@ -180,7 +178,6 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
                 if (remote > 0) {
                     pendingMapPath_ = path;
                     pendingLANTransport_ = true;
-                    // Simplified - no timer to avoid complexity
                     TeleportLANPlayers(path);
                     return;
                 }
@@ -188,7 +185,8 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
         }
     } catch (...) {}
 
-    if (cvarManager) cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
+    // Correct command
+    if (cvarManager) cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
 }
 
 void HostWorkshopMaps::TeleportLANPlayers(const std::string& mapPath)
@@ -222,6 +220,7 @@ void HostWorkshopMaps::Render()
         return;
     }
 
+    // UI code (same as before)
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - 130);
     if (ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), ImGuiInputTextFlags_EnterReturnsTrue)) {
         if (cvarManager) cvarManager->getCvar("hwm_maps_directory").setValue(std::string(dirBuf_));
