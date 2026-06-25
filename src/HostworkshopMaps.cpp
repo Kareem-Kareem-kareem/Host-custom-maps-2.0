@@ -1,4 +1,4 @@
-#include "HostworkshopMaps.h"
+#include "HostWorkshopMaps.h"
 
 #include <algorithm>
 #include <cctype>
@@ -691,3 +691,8 @@ bool HostWorkshopMaps::isLanHost()
         return false;
     }
 }
+
+// =============================================================================
+// CRITICAL: Export the plugin class so BakkesMod can load it
+// =============================================================================
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", PLUGINTYPE_FREEPLAY)
