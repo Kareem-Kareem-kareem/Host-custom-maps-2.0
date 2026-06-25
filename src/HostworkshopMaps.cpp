@@ -1,12 +1,14 @@
 #include "HostWorkshopMaps.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/gameevent/serverwrapper.h"
+#include "bakkesmod/wrappers/canvaswrapper.h"
 #include "imgui.h"
 #include <algorithm>
 #include <cctype>
-#include <Windows.h>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.5", PLUGINTYPE_FREEPLAY)
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.6", PLUGINTYPE_FREEPLAY)
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
 {
@@ -74,15 +76,55 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out)
     FindClose(hFind);
 }
 
-// ── onLoad: absolutely minimal, no hooks, no timeout, no filesystem ──────────
+// ─── onLoad ──────────────────────────────────────────────────────────────────
+
 void HostWorkshopMaps::onLoad()
 {
     cvarManager->registerCvar("hwm_maps_directory", "", "Maps folder", true);
     cvarManager->registerCvar("hwm_auto_scan", "1", "Auto-scan", true);
-    cvarManager->log("HostWorkshopMaps: loaded");
+
+    cvarManager->registerNotifier("hwm_open", [this](std::vector<std::string>) {
+        isWindowOpen_ = !isWindowOpen_;
+    }, "Toggle Host Workshop Maps window", PERMISSION_ALL);
+
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) {
+        ScanMaps();
+    }, "Scan maps directory", PERMISSION_ALL);
+
+    cvarManager->registerNotifier("hwm_load_path", [this](std::vector<std::string> args) {
+        if (args.size() < 2) return;
+        std::string path;
+        for (size_t i = 1; i < args.size(); ++i) { if (i > 1) path += " "; path += args[i]; }
+        LoadMapPath(SanitizePath(path));
+    }, "Load map by path", PERMISSION_ALL);
+
+    // Render hook — fires every frame on the game thread, safe for ImGui
+    gameWrapper->RegisterDrawable([this](CanvasWrapper canvas) {
+        OnRender(canvas);
+    });
+
+    gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
+        [this](std::string e) { OnTick(e); });
+
+    gameWrapper->SetTimeout([this](GameWrapper*) {
+        mapsDirectory_ = SanitizePath(
+            cvarManager->getCvar("hwm_maps_directory").getStringValue());
+        autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
+        strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
+        if (!mapsDirectory_.empty()) ScanMaps();
+        else SetStatus("Set a maps directory and click Scan");
+    }, 5.0f);
+
+    cvarManager->log("HostWorkshopMaps: loaded — use hwm_open or bind a key to open the window");
 }
 
-void HostWorkshopMaps::onUnload() {}
+void HostWorkshopMaps::onUnload()
+{
+    gameWrapper->UnregisterDrawables();
+    gameWrapper->UnhookEvent("Function TAGame.Car_TA.SetVehicleInput");
+}
+
+// ─── ScanMaps ────────────────────────────────────────────────────────────────
 
 void HostWorkshopMaps::ScanMaps()
 {
@@ -99,11 +141,14 @@ void HostWorkshopMaps::ScanMaps()
     SetStatus(std::to_string(mapList_.size()) + " maps found");
 }
 
+// ─── LoadMapPath ─────────────────────────────────────────────────────────────
+
 void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
     if (path.empty()) { SetStatus("No map selected"); return; }
     DWORD attr = GetFileAttributesA(path.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES) { SetStatus("File not found: " + path); return; }
+
     if (gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
@@ -120,6 +165,7 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
             }
         }
     }
+
     SetStatus("Loading: " + MapNameFromPath(path));
     cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
 }
@@ -141,20 +187,21 @@ void HostWorkshopMaps::OnTick(std::string)
     pendingMapPath_.clear();
 }
 
-void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
-{
-    ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
-}
+// ─── ImGui render (via RegisterDrawable) ─────────────────────────────────────
 
-void HostWorkshopMaps::Render()
+void HostWorkshopMaps::OnRender(CanvasWrapper canvas)
 {
     if (!isWindowOpen_) return;
+
     ImGui::SetNextWindowSize(ImVec2(620, 540), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(100, 100), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowPos(ImVec2(100, 100),  ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowBgAlpha(0.92f);
+
     if (!ImGui::Begin("Host Workshop Maps", &isWindowOpen_, ImGuiWindowFlags_NoCollapse)) {
         ImGui::End(); return;
     }
+
+    // Directory bar
     ImGui::PushItemWidth(ImGui::GetContentRegionAvail().x - 130);
     bool dirEnter = ImGui::InputText("##dir", dirBuf_, sizeof(dirBuf_), ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::PopItemWidth();
@@ -166,17 +213,22 @@ void HostWorkshopMaps::Render()
     }
     ImGui::SameLine();
     if (ImGui::Button("Scan", ImVec2(55, 0))) ScanMaps();
+
     ImGui::Spacing();
     ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
     if (ImGui::InputTextWithHint("##filter", "Search maps...", filterBuf_, sizeof(filterBuf_)))
         filterText_ = filterBuf_;
     ImGui::Spacing();
+
     auto filtered = FilteredMaps();
     float listHeight = ImGui::GetContentRegionAvail().y - 85;
     ImGui::BeginChild("##maplist", ImVec2(0, listHeight), true);
+
     if (filtered.empty()) {
         ImGui::Spacing();
-        ImGui::TextDisabled(mapList_.empty() ? "No maps found. Set your directory and click Scan." : "No maps match your search.");
+        ImGui::TextDisabled(mapList_.empty()
+            ? "No maps found. Set your directory and click Scan."
+            : "No maps match your search.");
     } else {
         for (int i = 0; i < (int)filtered.size(); ++i) {
             auto& m = filtered[i];
@@ -195,10 +247,13 @@ void HostWorkshopMaps::Render()
     }
     ImGui::EndChild();
     ImGui::Spacing();
+
     bool canLoad = (selectedIndex_ >= 0 && selectedIndex_ < (int)filtered.size());
     if (!canLoad) ImGui::BeginDisabled();
-    if (ImGui::Button("Load Map", ImVec2(120, 0)) && canLoad) LoadMapPath(filtered[selectedIndex_].fullPath);
+    if (ImGui::Button("Load Map", ImVec2(120, 0)) && canLoad)
+        LoadMapPath(filtered[selectedIndex_].fullPath);
     if (!canLoad) ImGui::EndDisabled();
+
     ImGui::SameLine();
     if (pendingLANTransport_) {
         ImGui::TextColored(ImVec4(1,0.8f,0,1), "Teleporting... (%d)", transportCountdown_);
@@ -208,15 +263,21 @@ void HostWorkshopMaps::Render()
             ArrayWrapper<PriWrapper> pris = server.GetPRIs();
             int remote = 0;
             for (int i = 0; i < pris.Count(); ++i) {
-                PriWrapper pri = pris.Get(i); if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
+                PriWrapper pri = pris.Get(i);
+                if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
             }
-            if (remote > 0) ImGui::TextColored(ImVec4(0.2f,1,0.5f,1), "LAN host | %d player(s)", remote);
-            else ImGui::TextDisabled("Hosting (no guests yet)");
+            if (remote > 0)
+                ImGui::TextColored(ImVec4(0.2f,1,0.5f,1), "LAN host | %d player(s)", remote);
+            else
+                ImGui::TextDisabled("Hosting (no guests yet)");
         }
     }
+
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 70);
     ImGui::TextDisabled("%d map(s)", (int)filtered.size());
     ImGui::Spacing();
-    if (!statusMsg_.empty()) ImGui::TextColored(ImVec4(0.7f,0.7f,0.7f,1), "%s", statusMsg_.c_str());
+    if (!statusMsg_.empty())
+        ImGui::TextColored(ImVec4(0.7f,0.7f,0.7f,1), "%s", statusMsg_.c_str());
+
     ImGui::End();
 }
