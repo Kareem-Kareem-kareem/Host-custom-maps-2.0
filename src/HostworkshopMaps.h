@@ -36,19 +36,10 @@ private:
     // LAN teleport
     bool isLanHost();
 
-    // UI helpers
-    void renderMapList();
-    void renderSettings();
-
     // Data
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
     int selectedMapIndex = -1;
     char searchFilter[256] = {0};
     bool isWindowOpen = false;
-    bool renderInitialized = false;
-    bool drawableRegistered = false;
-    float scanDelay = 0.0f;
-    bool pendingScan = false;
-    ImGuiContext* imguiContext = nullptr;
 };
