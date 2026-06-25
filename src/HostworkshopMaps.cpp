@@ -152,3 +152,4 @@ void HostWorkshopMaps::onUnload() {
     mapNames.clear();
     cvarManager->log("HWM: Unloaded");
 }
+
