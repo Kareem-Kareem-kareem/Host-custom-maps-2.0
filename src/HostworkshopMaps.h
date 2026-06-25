@@ -21,14 +21,6 @@ public:
     virtual void OnClose() override;
 
 private:
-    void scanDirectoryRecursive(const std::string& dir, int depth);
-    void scanMapsDirectory();
-    std::string getDefaultPath();
-    void loadMapByIndex(int index);
-    void loadMapByPath(const std::string& path);
-    bool isLanHost();
-    static std::string toLower(const std::string& s);
-
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
 };
