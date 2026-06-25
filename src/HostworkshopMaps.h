@@ -1,6 +1,5 @@
 #pragma once
 #include "bakkesmod/plugin/bakkesmodplugin.h"
-#include "bakkesmod/wrappers/canvaswrapper.h"
 #include <string>
 #include <vector>
 #include <Windows.h>
@@ -33,7 +32,6 @@ private:
     void LoadMapPath(const std::string& path);
     void TeleportLANPlayers(const std::string& path);
     void OnTick(std::string eventName);
-    void OnRender(CanvasWrapper canvas);
     void SetStatus(const std::string& msg);
 
     static std::string SanitizePath(const std::string& raw);
