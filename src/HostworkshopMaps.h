@@ -41,3 +41,4 @@ private:
     bool isWindowOpen = false;
     int selectedMapIndex = -1;
 };
+
