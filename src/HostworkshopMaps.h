@@ -1,39 +1,55 @@
 #pragma once
-#include "bakkesmod/plugin/bakkesmodplugin.h"
+
 #include <string>
 #include <vector>
-#include <Windows.h>
+#include <filesystem>
 
-struct MapEntry {
-    std::string displayName;
-    std::string fullPath;
-    std::string extension;
-};
+#include "bakkesmod/plugin/bakkesmodplugin.h"
+#include "bakkesmod/plugin/pluginwindow.h"
 
-class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin
+class WorkshopMapLoader : public BakkesMod::Plugin::BakkesModPlugin,
+                          public BakkesMod::Plugin::PluginWindow
 {
 public:
-    void onLoad()   override;
-    void onUnload() override;
+    // BakkesModPlugin overrides
+    virtual void onLoad() override;
+    virtual void onUnload() override;
+
+    // PluginWindow override - only called if RegisterDrawable is enabled
+    virtual void Render() override;
+
+    // Plugin metadata
+    virtual std::string GetMenuName() override;
+    virtual std::string GetMenuTitle() override;
+    virtual bool ShouldBlockInput() override;
+    virtual bool IsActiveOverlay() override;
+    virtual void OnOpen() override;
+    virtual void OnClose() override;
 
 private:
-    bool isWindowOpen_ = false;
+    // Map scanning
+    void safeScanMaps();
+    std::string getDefaultMapsPath();
 
-    std::vector<MapEntry> mapList_;
-    int selectedIndex_ = 0;
-    std::string statusMsg_;
-    std::string mapsDirectory_;
+    // Map loading
+    void loadMapByIndex(int index);
+    void loadMapByPath(const std::string& path);
+    void loadSelectedMap();
 
-    bool pendingLANTransport_ = false;
-    std::string pendingMapPath_;
-    int transportCountdown_ = 0;
+    // LAN teleport
+    bool isLanHost();
 
-    void ScanMaps();
-    void LoadMapPath(const std::string& path);
-    void TeleportLANPlayers(const std::string& path);
-    void OnTick(std::string eventName);
-    void SetStatus(const std::string& msg);
+    // UI helpers
+    void renderMapList();
+    void renderSettings();
 
-    static std::string SanitizePath(const std::string& raw);
-    static std::string MapNameFromPath(const std::string& path);
+    // Data
+    std::vector<std::string> mapFiles;
+    std::vector<std::string> mapNames;
+    int selectedMapIndex = -1;
+    char searchFilter[256] = {0};
+    bool isWindowOpen = false;
+    bool renderInitialized = false;
+    float scanDelay = 0.0f;
+    bool pendingScan = false;
 };
