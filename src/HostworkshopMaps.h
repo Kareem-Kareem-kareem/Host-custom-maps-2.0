@@ -13,7 +13,7 @@ public:
     virtual void onLoad() override;
     virtual void onUnload() override;
 
-    // PluginWindow overrides - ALL REQUIRED
+    // PluginWindow overrides - MINIMAL IMPLEMENTATIONS
     virtual void Render() override;
     virtual std::string GetMenuName() override;
     virtual std::string GetMenuTitle() override;
@@ -31,7 +31,6 @@ private:
     // Map loading
     void loadMapByIndex(int index);
     void loadMapByPath(const std::string& path);
-    void loadSelectedMap();
 
     // LAN teleport
     bool isLanHost();
@@ -39,7 +38,4 @@ private:
     // Data
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
-    int selectedMapIndex = -1;
-    char searchFilter[256] = {0};
-    bool isWindowOpen = false;
 };
