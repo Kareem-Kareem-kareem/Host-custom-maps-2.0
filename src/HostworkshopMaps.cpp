@@ -680,20 +680,11 @@ bool HostWorkshopMaps::isLanHost()
             return false;
         }
 
-        // Check there are remote players
+        // Check there are remote players (more than just us)
         auto members = server.GetPRIs();
-        int remoteCount = 0;
-
-        for (size_t i = 0; i < members.Count(); i++)
-        {
-            auto member = members.Get(i);
-            if (!member.IsNull() && !member.IsLocal())
-            {
-                remoteCount++;
-            }
-        }
-
-        return remoteCount > 0;
+        
+        // If there's more than 1 player and we have authority, we're hosting
+        return members.Count() > 1;
     }
     catch (...)
     {
