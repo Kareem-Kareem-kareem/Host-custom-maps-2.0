@@ -1,170 +1,699 @@
-#include "HostWorkshopMaps.h"
-#include "bakkesmod/wrappers/gamewrapper.h"
-#include "bakkesmod/wrappers/gameevent/serverwrapper.h"
+#include "WorkshopMapLoader.h"
+
 #include <algorithm>
 #include <cctype>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.8", PLUGINTYPE_FREEPLAY)
+#include "bakkesmod/wrappers/canvaswrapper.h"
+#include "bakkesmod/wrappers/gamewrapper.h"
+#include "bakkesmod/wrappers/serverwrapper.h"
 
-std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
+#include "imgui.h"
+
+// =============================================================================
+// Plugin Metadata
+// =============================================================================
+
+std::string WorkshopMapLoader::GetMenuName()
 {
-    std::string out = raw;
-    for (char& c : out) if (c == '\\') c = '/';
-    while (!out.empty() && out.back() == '/') out.pop_back();
-    return out;
+    return "Workshop Map Loader";
 }
 
-std::string HostWorkshopMaps::MapNameFromPath(const std::string& path)
+std::string WorkshopMapLoader::GetMenuTitle()
 {
-    size_t slash = path.find_last_of("/\\");
-    std::string f = (slash == std::string::npos) ? path : path.substr(slash + 1);
-    size_t dot = f.find_last_of('.');
-    return (dot == std::string::npos) ? f : f.substr(0, dot);
+    return "Workshop Map Loader";
 }
 
-void HostWorkshopMaps::SetStatus(const std::string& msg)
+bool WorkshopMapLoader::ShouldBlockInput()
 {
-    statusMsg_ = msg;
-    cvarManager->log("HostWorkshopMaps: " + msg);
+    return true;
 }
 
-static void WalkDir(const std::string& dir, std::vector<MapEntry>& out)
+bool WorkshopMapLoader::IsActiveOverlay()
 {
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
-    do {
-        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
-        std::string full = dir + "\\" + fd.cFileName;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            WalkDir(full, out);
-        } else {
-            std::string name = fd.cFileName;
-            size_t dot = name.find_last_of('.');
-            if (dot == std::string::npos) continue;
-            std::string ext = name.substr(dot + 1);
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext == "upk" || ext == "udk") {
-                MapEntry me;
-                me.extension = ext;
-                me.fullPath = full;
-                for (char& c : me.fullPath) if (c == '\\') c = '/';
-                me.displayName = name.substr(0, dot);
-                out.push_back(me);
+    return false;
+}
+
+void WorkshopMapLoader::OnOpen()
+{
+    isWindowOpen = true;
+    // Re-scan when the panel opens, but only if render is initialized
+    if (renderInitialized)
+    {
+        safeScanMaps();
+    }
+}
+
+void WorkshopMapLoader::OnClose()
+{
+    isWindowOpen = false;
+}
+
+// =============================================================================
+// onLoad — Plugin initialization
+// =============================================================================
+
+void WorkshopMapLoader::onLoad()
+{
+    try
+    {
+        cvarManager->log("=== WorkshopMapLoader v2.0 loading... ===");
+
+        // ---------------------------------------------------------------
+        // Step 1: Register CVars and commands (no game state needed)
+        // ---------------------------------------------------------------
+        cvarManager->registerCvar(
+            "wml_maps_directory",
+            getDefaultMapsPath(),
+            "Directory to scan for .upk and .udk Workshop maps",
+            true,  // persist
+            true   // has min
+        );
+
+        // Register console command: re-scan directory
+        cvarManager->registerNotifier(
+            "wml_scan",
+            [this](std::vector<std::string> params) {
+                cvarManager->log("Manual scan triggered via wml_scan");
+                safeScanMaps();
+            },
+            "Re-scan the maps directory for .upk and .udk files",
+            PERMISSION_ALL
+        );
+
+        // Register console command: list all found maps
+        cvarManager->registerNotifier(
+            "wml_list",
+            [this](std::vector<std::string> params) {
+                if (mapFiles.empty())
+                {
+                    cvarManager->log("No maps found. Run wml_scan first.");
+                    return;
+                }
+                cvarManager->log("=== Found " + std::to_string(mapFiles.size()) + " maps ===");
+                for (size_t i = 0; i < mapFiles.size(); i++)
+                {
+                    cvarManager->log("[" + std::to_string(i) + "] " + mapNames[i]);
+                }
+            },
+            "List all found maps with their indices",
+            PERMISSION_ALL
+        );
+
+        // Register console command: load map by index
+        cvarManager->registerNotifier(
+            "wml_load_index",
+            [this](std::vector<std::string> params) {
+                if (params.size() < 2)
+                {
+                    cvarManager->log("Usage: wml_load_index <index>");
+                    return;
+                }
+                try
+                {
+                    int idx = std::stoi(params[1]);
+                    loadMapByIndex(idx);
+                }
+                catch (...)
+                {
+                    cvarManager->log("Invalid index: " + params[1]);
+                }
+            },
+            "Load a map by its index (0-based, from wml_list)",
+            PERMISSION_ALL
+        );
+
+        // Register console command: load map by full path
+        cvarManager->registerNotifier(
+            "wml_load_path",
+            [this](std::vector<std::string> params) {
+                if (params.size() < 2)
+                {
+                    cvarManager->log("Usage: wml_load_path <full/path/to/map.upk>");
+                    return;
+                }
+                loadMapByPath(params[1]);
+            },
+            "Load a map by full absolute file path",
+            PERMISSION_ALL
+        );
+
+        cvarManager->log("CVars and commands registered.");
+
+        // ---------------------------------------------------------------
+        // Step 2: Defer directory scanning (avoid blocking onLoad)
+        // ---------------------------------------------------------------
+        gameWrapper->SetTimeout(
+            [this](GameWrapper* gw) {
+                cvarManager->log("Performing deferred map scan...");
+                safeScanMaps();
+                pendingScan = false;
+            },
+            1.5f  // Wait 1.5 seconds after injection
+        );
+        pendingScan = true;
+
+        cvarManager->log("Scan scheduled for 1.5s delay.");
+
+        // ---------------------------------------------------------------
+        // Step 3: REGISTER DRAWABLE — CAREFULLY!
+        //
+        // Defer this too so all data structures exist before Render()
+        // is called for the first time.
+        // ---------------------------------------------------------------
+        gameWrapper->SetTimeout(
+            [this](GameWrapper* gw) {
+                cvarManager->log("Registering drawable...");
+
+                // Double-check scan is done before we start rendering
+                if (pendingScan)
+                {
+                    safeScanMaps();
+                    pendingScan = false;
+                }
+
+                renderInitialized = true;
+
+                // Register the drawable with a SAFE lambda wrapper
+                gameWrapper->RegisterDrawable(
+                    [this](CanvasWrapper canvas) {
+                        // -------------------------------------------------------
+                        // EVERYTHING in here runs 60+ times per second.
+                        // ANY crash here = game crash.
+                        // -------------------------------------------------------
+                        try
+                        {
+                            // Only render if the panel is actually open
+                            if (!isWindowOpen)
+                            {
+                                return;
+                            }
+
+                            // Only render if fully initialized
+                            if (!renderInitialized)
+                            {
+                                return;
+                            }
+
+                            // Call the actual Render method
+                            Render();
+                        }
+                        catch (const std::exception& e)
+                        {
+                            // Log and swallow — prevent crash
+                            cvarManager->log(
+                                "WORKSHOPMAPLOADER RENDER ERROR: " +
+                                std::string(e.what())
+                            );
+                        }
+                        catch (...)
+                        {
+                            cvarManager->log(
+                                "WORKSHOPMAPLOADER RENDER: UNKNOWN EXCEPTION"
+                            );
+                        }
+                    }
+                );
+
+                cvarManager->log("Drawable registered successfully.");
+            },
+            3.0f  // Wait 3 full seconds — ensure everything is ready
+        );
+
+        cvarManager->log("=== WorkshopMapLoader v2.0 loaded successfully! ===");
+    }
+    catch (const std::exception& e)
+    {
+        if (cvarManager)
+        {
+            cvarManager->log(
+                "WORKSHOPMAPLOADER FATAL onLoad ERROR: " +
+                std::string(e.what())
+            );
+        }
+    }
+    catch (...)
+    {
+        if (cvarManager)
+        {
+            cvarManager->log(
+                "WORKSHOPMAPLOADER FATAL onLoad: UNKNOWN EXCEPTION"
+            );
+        }
+    }
+}
+
+// =============================================================================
+// onUnload
+// =============================================================================
+
+void WorkshopMapLoader::onUnload()
+{
+    cvarManager->log("WorkshopMapLoader unloading...");
+    // No explicit UnregisterDrawable needed — BakkesMod handles it
+}
+
+// =============================================================================
+// Render — ImGui panel (called every frame when window is open)
+// =============================================================================
+
+void WorkshopMapLoader::Render()
+{
+    // Safety: if ImGui context isn't ready, bail
+    if (!ImGui::GetCurrentContext())
+    {
+        return;
+    }
+
+    // Main panel window
+    ImGui::SetNextWindowSize(ImVec2(500, 600), ImGuiCond_FirstUseEver);
+
+    if (!ImGui::Begin("Workshop Map Loader v2.0", &isWindowOpen))
+    {
+        ImGui::End();
+        return;
+    }
+
+    // ---- Search bar ----
+    ImGui::Text("Search:");
+    ImGui::SameLine();
+    ImGui::InputText("##search", searchFilter, sizeof(searchFilter));
+
+    ImGui::Separator();
+
+    // ---- Map list ----
+    renderMapList();
+
+    ImGui::Separator();
+
+    // ---- Load button ----
+    ImGui::Text("Selected: %s",
+        selectedMapIndex >= 0 && selectedMapIndex < (int)mapNames.size()
+            ? mapNames[selectedMapIndex].c_str()
+            : "None"
+    );
+
+    if (ImGui::Button("Load Selected Map", ImVec2(ImGui::GetContentRegionAvail().x, 40)))
+    {
+        loadSelectedMap();
+    }
+
+    ImGui::Separator();
+
+    // ---- Settings ----
+    renderSettings();
+
+    // ---- Status bar ----
+    ImGui::Separator();
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+        "%zu maps loaded", mapFiles.size());
+    ImGui::TextColored(ImVec4(0.5f, 0.5f, 0.5f, 1.0f),
+        "LAN Host: %s", isLanHost() ? "Yes" : "No");
+
+    ImGui::End();
+}
+
+// =============================================================================
+// renderMapList — Filtered, scrollable map list
+// =============================================================================
+
+void WorkshopMapLoader::renderMapList()
+{
+    std::string filter(searchFilter);
+    std::transform(filter.begin(), filter.end(), filter.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+
+    ImGui::BeginChild("MapList", ImVec2(0, 300), true);
+
+    if (mapFiles.empty())
+    {
+        ImGui::TextColored(
+            ImVec4(1.0f, 0.5f, 0.0f, 1.0f),
+            "No maps found. Click 'Scan Now' or use wml_scan in console."
+        );
+    }
+    else
+    {
+        for (size_t i = 0; i < mapFiles.size(); i++)
+        {
+            // Apply search filter
+            if (!filter.empty())
+            {
+                std::string nameLower = mapNames[i];
+                std::transform(nameLower.begin(), nameLower.end(),
+                    nameLower.begin(),
+                    [](unsigned char c) { return std::tolower(c); });
+
+                if (nameLower.find(filter) == std::string::npos)
+                {
+                    continue;
+                }
+            }
+
+            // Highlight selected item
+            bool isSelected = ((int)i == selectedMapIndex);
+            if (ImGui::Selectable(mapNames[i].c_str(), isSelected))
+            {
+                selectedMapIndex = (int)i;
+            }
+
+            // Scroll to selected if needed
+            if (isSelected)
+            {
+                ImGui::SetItemDefaultFocus();
             }
         }
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
+    }
+
+    ImGui::EndChild();
 }
 
-void HostWorkshopMaps::onLoad()
+// =============================================================================
+// renderSettings — Settings panel
+// =============================================================================
+
+void WorkshopMapLoader::renderSettings()
 {
-    cvarManager->registerCvar("hwm_maps_directory", "", "Maps folder", true);
+    if (ImGui::TreeNode("Settings"))
+    {
+        // Maps directory
+        ImGui::Text("Maps Directory:");
+        static char dirBuffer[512] = {0};
 
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) {
-        ScanMaps();
-    }, "Scan maps directory", PERMISSION_ALL);
+        std::string currentDir =
+            cvarManager->getCvar("wml_maps_directory").getStringValue();
 
-    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>) {
-        for (int i = 0; i < (int)mapList_.size(); ++i)
-            cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName);
-    }, "List maps in console", PERMISSION_ALL);
+        if (dirBuffer[0] == 0)
+        {
+            strncpy(dirBuffer, currentDir.c_str(), sizeof(dirBuffer) - 1);
+        }
 
-    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> args) {
-        if (args.size() < 2) {
-            if (!mapList_.empty()) LoadMapPath(mapList_[selectedIndex_].fullPath);
+        ImGui::InputText("##mapsdir", dirBuffer, sizeof(dirBuffer),
+            ImGuiInputTextFlags_ReadOnly);
+        ImGui::SameLine();
+
+        if (ImGui::Button("Scan Now"))
+        {
+            safeScanMaps();
+        }
+
+        ImGui::TreePop();
+    }
+
+    ImGui::Separator();
+
+    if (ImGui::Button("Scan for Maps", ImVec2(ImGui::GetContentRegionAvail().x, 30)))
+    {
+        safeScanMaps();
+    }
+}
+
+// =============================================================================
+// safeScanMaps — Scan directory with full error handling
+// =============================================================================
+
+void WorkshopMapLoader::safeScanMaps()
+{
+    try
+    {
+        mapFiles.clear();
+        mapNames.clear();
+        selectedMapIndex = -1;
+
+        std::string mapsDir =
+            cvarManager->getCvar("wml_maps_directory").getStringValue();
+
+        if (mapsDir.empty())
+        {
+            cvarManager->log("WML: No maps directory configured!");
             return;
         }
-        int idx = std::stoi(args[1]);
-        if (idx >= 0 && idx < (int)mapList_.size()) {
-            selectedIndex_ = idx;
-            LoadMapPath(mapList_[idx].fullPath);
+
+        // Check directory exists
+        if (!std::filesystem::exists(mapsDir))
+        {
+            cvarManager->log("WML: Directory does not exist: " + mapsDir);
+            return;
         }
-    }, "Load map by index", PERMISSION_ALL);
 
-    cvarManager->registerNotifier("hwm_next", [this](std::vector<std::string>) {
-        if (mapList_.empty()) return;
-        selectedIndex_ = (selectedIndex_ + 1) % mapList_.size();
-        SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
-    }, "Select next map", PERMISSION_ALL);
+        // Check it's actually a directory
+        if (!std::filesystem::is_directory(mapsDir))
+        {
+            cvarManager->log("WML: Path is not a directory: " + mapsDir);
+            return;
+        }
 
-    cvarManager->registerNotifier("hwm_prev", [this](std::vector<std::string>) {
-        if (mapList_.empty()) return;
-        selectedIndex_ = (selectedIndex_ - 1 + mapList_.size()) % mapList_.size();
-        SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
-    }, "Select previous map", PERMISSION_ALL);
+        // Recursively scan with skip_permission_denied
+        auto options =
+            std::filesystem::directory_options::skip_permission_denied;
 
-    gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
-        [this](std::string e) { OnTick(e); });
+        for (auto& entry :
+             std::filesystem::recursive_directory_iterator(mapsDir, options))
+        {
+            try
+            {
+                if (!entry.is_regular_file())
+                {
+                    continue;
+                }
 
-    gameWrapper->SetTimeout([this](GameWrapper*) {
-        mapsDirectory_ = SanitizePath(
-            cvarManager->getCvar("hwm_maps_directory").getStringValue());
-        if (!mapsDirectory_.empty()) ScanMaps();
-        else SetStatus("Set hwm_maps_directory then run hwm_scan");
-    }, 5.0f);
+                auto ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(),
+                    [](unsigned char c) { return std::tolower(c); });
 
-    cvarManager->log("HostWorkshopMaps: loaded");
-}
+                if (ext == ".upk" || ext == ".udk")
+                {
+                    std::string fullPath = entry.path().string();
+                    std::string fileName = entry.path().filename().string();
 
-void HostWorkshopMaps::onUnload()
-{
-    gameWrapper->UnhookEvent("Function TAGame.Car_TA.SetVehicleInput");
-}
+                    mapFiles.push_back(fullPath);
+                    mapNames.push_back(fileName);
+                }
+            }
+            catch (...)
+            {
+                // Skip individual file errors
+                continue;
+            }
+        }
 
-void HostWorkshopMaps::ScanMaps()
-{
-    mapList_.clear(); selectedIndex_ = 0;
-    if (mapsDirectory_.empty()) { SetStatus("No directory set"); return; }
-    DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
-    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Directory not found: " + mapsDirectory_); return;
+        cvarManager->log(
+            "WML: Scan complete. Found " +
+            std::to_string(mapFiles.size()) + " maps in: " + mapsDir
+        );
     }
-    WalkDir(mapsDirectory_, mapList_);
-    std::sort(mapList_.begin(), mapList_.end(),
-        [](const MapEntry& a, const MapEntry& b){ return a.displayName < b.displayName; });
-    SetStatus(std::to_string(mapList_.size()) + " maps found");
+    catch (const std::exception& e)
+    {
+        cvarManager->log(
+            "WML: Scan error: " + std::string(e.what())
+        );
+    }
+    catch (...)
+    {
+        cvarManager->log("WML: Unknown scan error");
+    }
 }
 
-void HostWorkshopMaps::LoadMapPath(const std::string& path)
+// =============================================================================
+// getDefaultMapsPath
+// =============================================================================
+
+std::string WorkshopMapLoader::getDefaultMapsPath()
 {
-    if (path.empty()) { SetStatus("No map selected"); return; }
-    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        SetStatus("File not found: " + path); return;
+    // Try multiple common locations
+    std::vector<std::string> candidates;
+
+    // 1. BakkesMod data folder
+    char* appData = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&appData, &len, "APPDATA") == 0 && appData)
+    {
+        candidates.push_back(
+            std::string(appData) + "\\bakkesmod\\bakkesmod\\data\\workshop"
+        );
+        free(appData);
     }
-    if (gameWrapper->IsInGame()) {
+
+    // 2. Steam workshop folder
+    char* progFiles = nullptr;
+    if (_dupenv_s(&progFiles, &len, "ProgramFiles(x86)") == 0 && progFiles)
+    {
+        candidates.push_back(
+            std::string(progFiles) + "\\Steam\\steamapps\\workshop\\content\\252950"
+        );
+        free(progFiles);
+    }
+
+    // 3. Documents folder
+    char* userProfile = nullptr;
+    if (_dupenv_s(&userProfile, &len, "USERPROFILE") == 0 && userProfile)
+    {
+        candidates.push_back(
+            std::string(userProfile) + "\\Documents\\rocketleague\\workshop"
+        );
+        free(userProfile);
+    }
+
+    // Return first existing directory
+    for (const auto& path : candidates)
+    {
+        try
+        {
+            if (std::filesystem::exists(path))
+            {
+                return path;
+            }
+        }
+        catch (...) {}
+    }
+
+    // Default to the BakkesMod data folder (will be created if needed)
+    return candidates.empty() ? "" : candidates[0];
+}
+
+// =============================================================================
+// loadMapByIndex
+// =============================================================================
+
+void WorkshopMapLoader::loadMapByIndex(int index)
+{
+    if (index < 0 || index >= (int)mapFiles.size())
+    {
+        cvarManager->log(
+            "WML: Invalid map index: " + std::to_string(index) +
+            " (total: " + std::to_string(mapFiles.size()) + ")"
+        );
+        return;
+    }
+
+    loadMapByPath(mapFiles[index]);
+}
+
+// =============================================================================
+// loadMapByPath — The core map loading function
+// =============================================================================
+
+void WorkshopMapLoader::loadMapByPath(const std::string& path)
+{
+    try
+    {
+        cvarManager->log("WML: Loading map: " + path);
+
+        // Validate file exists
+        if (!std::filesystem::exists(path))
+        {
+            cvarManager->log("WML: Map file not found: " + path);
+            return;
+        }
+
+        // Check if we are a LAN host with connected players
+        if (isLanHost())
+        {
+            // Use ServerTravel to move all connected clients
+            cvarManager->log("WML: LAN host detected — using servertravel");
+
+            gameWrapper->SetTimeout(
+                [this, path](GameWrapper* gw) {
+                    try
+                    {
+                        std::string cmd = "servertravel \"" + path + "\"";
+                        cvarManager->log("WML: Executing: " + cmd);
+                        gameWrapper->ExecuteUnrealCommand(cmd);
+                    }
+                    catch (...)
+                    {
+                        cvarManager->log("WML: ServerTravel failed");
+                    }
+                },
+                1.0f  // 1 second delay for Unreal readiness
+            );
+        }
+        else
+        {
+            // Not a LAN host — just load locally
+            cvarManager->log("WML: Loading map locally");
+
+            gameWrapper->SetTimeout(
+                [this, path](GameWrapper* gw) {
+                    try
+                    {
+                        std::string cmd = "open \"" + path + "\"";
+                        cvarManager->log("WML: Executing: " + cmd);
+                        gameWrapper->ExecuteUnrealCommand(cmd);
+                    }
+                    catch (...)
+                    {
+                        cvarManager->log("WML: Local map load failed");
+                    }
+                },
+                0.5f
+            );
+        }
+    }
+    catch (const std::exception& e)
+    {
+        cvarManager->log(
+            "WML: loadMapByPath error: " + std::string(e.what())
+        );
+    }
+    catch (...)
+    {
+        cvarManager->log("WML: loadMapByPath: unknown error");
+    }
+}
+
+// =============================================================================
+// loadSelectedMap — Load whatever user selected in the UI
+// =============================================================================
+
+void WorkshopMapLoader::loadSelectedMap()
+{
+    if (selectedMapIndex < 0 || selectedMapIndex >= (int)mapFiles.size())
+    {
+        cvarManager->log("WML: No map selected or invalid selection");
+        return;
+    }
+
+    loadMapByIndex(selectedMapIndex);
+}
+
+// =============================================================================
+// isLanHost — Check if we're hosting a LAN match with players connected
+// =============================================================================
+
+bool WorkshopMapLoader::isLanHost()
+{
+    try
+    {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
-        if (!server.IsNull() && server.HasAuthority()) {
-            ArrayWrapper<PriWrapper> pris = server.GetPRIs();
-            int remote = 0;
-            for (int i = 0; i < pris.Count(); ++i) {
-                PriWrapper pri = pris.Get(i);
-                if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
-            }
-            if (remote > 0) {
-                SetStatus("LAN: teleporting " + std::to_string(remote) + " player(s)...");
-                pendingMapPath_ = path; pendingLANTransport_ = true; transportCountdown_ = 60;
-                return;
+
+        if (server.IsNull())
+        {
+            return false;
+        }
+
+        // Check we have hosting authority
+        if (!server.HasAuthority())
+        {
+            return false;
+        }
+
+        // Check there are remote players
+        auto members = server.GetPRIs();
+        int remoteCount = 0;
+
+        for (size_t i = 0; i < members.Count(); i++)
+        {
+            auto member = members.Get(i);
+            if (!member.IsNull() && !member.IsLocal())
+            {
+                remoteCount++;
             }
         }
+
+        return remoteCount > 0;
     }
-    SetStatus("Loading: " + MapNameFromPath(path));
-    cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
-}
-
-void HostWorkshopMaps::TeleportLANPlayers(const std::string& path)
-{
-    if (!gameWrapper->IsInGame()) return;
-    ServerWrapper server = gameWrapper->GetCurrentGameState();
-    if (server.IsNull() || !server.HasAuthority()) return;
-    gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
-}
-
-void HostWorkshopMaps::OnTick(std::string)
-{
-    if (!pendingLANTransport_) return;
-    if (--transportCountdown_ > 0) return;
-    pendingLANTransport_ = false;
-    TeleportLANPlayers(pendingMapPath_);
-    pendingMapPath_.clear();
+    catch (...)
+    {
+        return false;
+    }
 }
