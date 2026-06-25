@@ -6,7 +6,7 @@
 
 #include "bakkesmod/wrappers/canvaswrapper.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
-#include "bakkesmod/wrappers/serverwrapper.h"
+#include "bakkesmod/wrappers/GameObject/ServerWrapper.h"
 
 #include "imgui.h"
 
