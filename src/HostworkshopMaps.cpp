@@ -1,7 +1,8 @@
-#include "WorkshopMapLoader.h"
+#include "HostWorkshopMaps.h"
 
 #include <algorithm>
 #include <cctype>
+#include <stdlib.h>
 
 #include "bakkesmod/wrappers/canvaswrapper.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
@@ -13,27 +14,27 @@
 // Plugin Metadata
 // =============================================================================
 
-std::string WorkshopMapLoader::GetMenuName()
+std::string HostWorkshopMaps::GetMenuName()
 {
-    return "Workshop Map Loader";
+    return "Host Workshop Maps";
 }
 
-std::string WorkshopMapLoader::GetMenuTitle()
+std::string HostWorkshopMaps::GetMenuTitle()
 {
-    return "Workshop Map Loader";
+    return "Host Workshop Maps 2.0";
 }
 
-bool WorkshopMapLoader::ShouldBlockInput()
+bool HostWorkshopMaps::ShouldBlockInput()
 {
     return true;
 }
 
-bool WorkshopMapLoader::IsActiveOverlay()
+bool HostWorkshopMaps::IsActiveOverlay()
 {
     return false;
 }
 
-void WorkshopMapLoader::OnOpen()
+void HostWorkshopMaps::OnOpen()
 {
     isWindowOpen = true;
     // Re-scan when the panel opens, but only if render is initialized
@@ -43,7 +44,7 @@ void WorkshopMapLoader::OnOpen()
     }
 }
 
-void WorkshopMapLoader::OnClose()
+void HostWorkshopMaps::OnClose()
 {
     isWindowOpen = false;
 }
@@ -52,17 +53,17 @@ void WorkshopMapLoader::OnClose()
 // onLoad — Plugin initialization
 // =============================================================================
 
-void WorkshopMapLoader::onLoad()
+void HostWorkshopMaps::onLoad()
 {
     try
     {
-        cvarManager->log("=== WorkshopMapLoader v2.0 loading... ===");
+        cvarManager->log("=== HostWorkshopMaps v2.0 loading... ===");
 
         // ---------------------------------------------------------------
         // Step 1: Register CVars and commands (no game state needed)
         // ---------------------------------------------------------------
         cvarManager->registerCvar(
-            "wml_maps_directory",
+            "hwm_maps_directory",
             getDefaultMapsPath(),
             "Directory to scan for .upk and .udk Workshop maps",
             true,  // persist
@@ -71,9 +72,9 @@ void WorkshopMapLoader::onLoad()
 
         // Register console command: re-scan directory
         cvarManager->registerNotifier(
-            "wml_scan",
+            "hwm_scan",
             [this](std::vector<std::string> params) {
-                cvarManager->log("Manual scan triggered via wml_scan");
+                cvarManager->log("Manual scan triggered via hwm_scan");
                 safeScanMaps();
             },
             "Re-scan the maps directory for .upk and .udk files",
@@ -82,11 +83,11 @@ void WorkshopMapLoader::onLoad()
 
         // Register console command: list all found maps
         cvarManager->registerNotifier(
-            "wml_list",
+            "hwm_list",
             [this](std::vector<std::string> params) {
                 if (mapFiles.empty())
                 {
-                    cvarManager->log("No maps found. Run wml_scan first.");
+                    cvarManager->log("No maps found. Run hwm_scan first.");
                     return;
                 }
                 cvarManager->log("=== Found " + std::to_string(mapFiles.size()) + " maps ===");
@@ -101,11 +102,11 @@ void WorkshopMapLoader::onLoad()
 
         // Register console command: load map by index
         cvarManager->registerNotifier(
-            "wml_load_index",
+            "hwm_load_index",
             [this](std::vector<std::string> params) {
                 if (params.size() < 2)
                 {
-                    cvarManager->log("Usage: wml_load_index <index>");
+                    cvarManager->log("Usage: hwm_load_index <index>");
                     return;
                 }
                 try
@@ -118,17 +119,17 @@ void WorkshopMapLoader::onLoad()
                     cvarManager->log("Invalid index: " + params[1]);
                 }
             },
-            "Load a map by its index (0-based, from wml_list)",
+            "Load a map by its index (0-based, from hwm_list)",
             PERMISSION_ALL
         );
 
         // Register console command: load map by full path
         cvarManager->registerNotifier(
-            "wml_load_path",
+            "hwm_load_path",
             [this](std::vector<std::string> params) {
                 if (params.size() < 2)
                 {
-                    cvarManager->log("Usage: wml_load_path <full/path/to/map.upk>");
+                    cvarManager->log("Usage: hwm_load_path <full/path/to/map.upk>");
                     return;
                 }
                 loadMapByPath(params[1]);
@@ -157,8 +158,10 @@ void WorkshopMapLoader::onLoad()
         // ---------------------------------------------------------------
         // Step 3: REGISTER DRAWABLE — CAREFULLY!
         //
-        // Defer this too so all data structures exist before Render()
-        // is called for the first time.
+        // THIS WAS CAUSING YOUR CRASH!
+        // - Defer it so all data structures exist before Render() is called
+        // - Wrap in try-catch to prevent game crashes
+        // - Only render when window is actually open
         // ---------------------------------------------------------------
         gameWrapper->SetTimeout(
             [this](GameWrapper* gw) {
@@ -201,14 +204,14 @@ void WorkshopMapLoader::onLoad()
                         {
                             // Log and swallow — prevent crash
                             cvarManager->log(
-                                "WORKSHOPMAPLOADER RENDER ERROR: " +
+                                "HWM RENDER ERROR: " +
                                 std::string(e.what())
                             );
                         }
                         catch (...)
                         {
                             cvarManager->log(
-                                "WORKSHOPMAPLOADER RENDER: UNKNOWN EXCEPTION"
+                                "HWM RENDER: UNKNOWN EXCEPTION"
                             );
                         }
                     }
@@ -219,14 +222,14 @@ void WorkshopMapLoader::onLoad()
             3.0f  // Wait 3 full seconds — ensure everything is ready
         );
 
-        cvarManager->log("=== WorkshopMapLoader v2.0 loaded successfully! ===");
+        cvarManager->log("=== HostWorkshopMaps v2.0 loaded successfully! ===");
     }
     catch (const std::exception& e)
     {
         if (cvarManager)
         {
             cvarManager->log(
-                "WORKSHOPMAPLOADER FATAL onLoad ERROR: " +
+                "HWM FATAL onLoad ERROR: " +
                 std::string(e.what())
             );
         }
@@ -236,7 +239,7 @@ void WorkshopMapLoader::onLoad()
         if (cvarManager)
         {
             cvarManager->log(
-                "WORKSHOPMAPLOADER FATAL onLoad: UNKNOWN EXCEPTION"
+                "HWM FATAL onLoad: UNKNOWN EXCEPTION"
             );
         }
     }
@@ -246,9 +249,9 @@ void WorkshopMapLoader::onLoad()
 // onUnload
 // =============================================================================
 
-void WorkshopMapLoader::onUnload()
+void HostWorkshopMaps::onUnload()
 {
-    cvarManager->log("WorkshopMapLoader unloading...");
+    cvarManager->log("HostWorkshopMaps unloading...");
     // No explicit UnregisterDrawable needed — BakkesMod handles it
 }
 
@@ -256,7 +259,7 @@ void WorkshopMapLoader::onUnload()
 // Render — ImGui panel (called every frame when window is open)
 // =============================================================================
 
-void WorkshopMapLoader::Render()
+void HostWorkshopMaps::Render()
 {
     // Safety: if ImGui context isn't ready, bail
     if (!ImGui::GetCurrentContext())
@@ -267,7 +270,7 @@ void WorkshopMapLoader::Render()
     // Main panel window
     ImGui::SetNextWindowSize(ImVec2(500, 600), ImGuiCond_FirstUseEver);
 
-    if (!ImGui::Begin("Workshop Map Loader v2.0", &isWindowOpen))
+    if (!ImGui::Begin("Host Workshop Maps 2.0", &isWindowOpen))
     {
         ImGui::End();
         return;
@@ -316,7 +319,7 @@ void WorkshopMapLoader::Render()
 // renderMapList — Filtered, scrollable map list
 // =============================================================================
 
-void WorkshopMapLoader::renderMapList()
+void HostWorkshopMaps::renderMapList()
 {
     std::string filter(searchFilter);
     std::transform(filter.begin(), filter.end(), filter.begin(),
@@ -328,7 +331,7 @@ void WorkshopMapLoader::renderMapList()
     {
         ImGui::TextColored(
             ImVec4(1.0f, 0.5f, 0.0f, 1.0f),
-            "No maps found. Click 'Scan Now' or use wml_scan in console."
+            "No maps found. Click 'Scan Now' or use hwm_scan in console."
         );
     }
     else
@@ -371,7 +374,7 @@ void WorkshopMapLoader::renderMapList()
 // renderSettings — Settings panel
 // =============================================================================
 
-void WorkshopMapLoader::renderSettings()
+void HostWorkshopMaps::renderSettings()
 {
     if (ImGui::TreeNode("Settings"))
     {
@@ -380,7 +383,7 @@ void WorkshopMapLoader::renderSettings()
         static char dirBuffer[512] = {0};
 
         std::string currentDir =
-            cvarManager->getCvar("wml_maps_directory").getStringValue();
+            cvarManager->getCvar("hwm_maps_directory").getStringValue();
 
         if (dirBuffer[0] == 0)
         {
@@ -411,7 +414,7 @@ void WorkshopMapLoader::renderSettings()
 // safeScanMaps — Scan directory with full error handling
 // =============================================================================
 
-void WorkshopMapLoader::safeScanMaps()
+void HostWorkshopMaps::safeScanMaps()
 {
     try
     {
@@ -420,25 +423,25 @@ void WorkshopMapLoader::safeScanMaps()
         selectedMapIndex = -1;
 
         std::string mapsDir =
-            cvarManager->getCvar("wml_maps_directory").getStringValue();
+            cvarManager->getCvar("hwm_maps_directory").getStringValue();
 
         if (mapsDir.empty())
         {
-            cvarManager->log("WML: No maps directory configured!");
+            cvarManager->log("HWM: No maps directory configured!");
             return;
         }
 
         // Check directory exists
         if (!std::filesystem::exists(mapsDir))
         {
-            cvarManager->log("WML: Directory does not exist: " + mapsDir);
+            cvarManager->log("HWM: Directory does not exist: " + mapsDir);
             return;
         }
 
         // Check it's actually a directory
         if (!std::filesystem::is_directory(mapsDir))
         {
-            cvarManager->log("WML: Path is not a directory: " + mapsDir);
+            cvarManager->log("HWM: Path is not a directory: " + mapsDir);
             return;
         }
 
@@ -477,19 +480,19 @@ void WorkshopMapLoader::safeScanMaps()
         }
 
         cvarManager->log(
-            "WML: Scan complete. Found " +
+            "HWM: Scan complete. Found " +
             std::to_string(mapFiles.size()) + " maps in: " + mapsDir
         );
     }
     catch (const std::exception& e)
     {
         cvarManager->log(
-            "WML: Scan error: " + std::string(e.what())
+            "HWM: Scan error: " + std::string(e.what())
         );
     }
     catch (...)
     {
-        cvarManager->log("WML: Unknown scan error");
+        cvarManager->log("HWM: Unknown scan error");
     }
 }
 
@@ -497,7 +500,7 @@ void WorkshopMapLoader::safeScanMaps()
 // getDefaultMapsPath
 // =============================================================================
 
-std::string WorkshopMapLoader::getDefaultMapsPath()
+std::string HostWorkshopMaps::getDefaultMapsPath()
 {
     // Try multiple common locations
     std::vector<std::string> candidates;
@@ -554,12 +557,12 @@ std::string WorkshopMapLoader::getDefaultMapsPath()
 // loadMapByIndex
 // =============================================================================
 
-void WorkshopMapLoader::loadMapByIndex(int index)
+void HostWorkshopMaps::loadMapByIndex(int index)
 {
     if (index < 0 || index >= (int)mapFiles.size())
     {
         cvarManager->log(
-            "WML: Invalid map index: " + std::to_string(index) +
+            "HWM: Invalid map index: " + std::to_string(index) +
             " (total: " + std::to_string(mapFiles.size()) + ")"
         );
         return;
@@ -572,16 +575,16 @@ void WorkshopMapLoader::loadMapByIndex(int index)
 // loadMapByPath — The core map loading function
 // =============================================================================
 
-void WorkshopMapLoader::loadMapByPath(const std::string& path)
+void HostWorkshopMaps::loadMapByPath(const std::string& path)
 {
     try
     {
-        cvarManager->log("WML: Loading map: " + path);
+        cvarManager->log("HWM: Loading map: " + path);
 
         // Validate file exists
         if (!std::filesystem::exists(path))
         {
-            cvarManager->log("WML: Map file not found: " + path);
+            cvarManager->log("HWM: Map file not found: " + path);
             return;
         }
 
@@ -589,19 +592,19 @@ void WorkshopMapLoader::loadMapByPath(const std::string& path)
         if (isLanHost())
         {
             // Use ServerTravel to move all connected clients
-            cvarManager->log("WML: LAN host detected — using servertravel");
+            cvarManager->log("HWM: LAN host detected — using servertravel");
 
             gameWrapper->SetTimeout(
                 [this, path](GameWrapper* gw) {
                     try
                     {
                         std::string cmd = "servertravel \"" + path + "\"";
-                        cvarManager->log("WML: Executing: " + cmd);
+                        cvarManager->log("HWM: Executing: " + cmd);
                         gameWrapper->ExecuteUnrealCommand(cmd);
                     }
                     catch (...)
                     {
-                        cvarManager->log("WML: ServerTravel failed");
+                        cvarManager->log("HWM: ServerTravel failed");
                     }
                 },
                 1.0f  // 1 second delay for Unreal readiness
@@ -610,19 +613,19 @@ void WorkshopMapLoader::loadMapByPath(const std::string& path)
         else
         {
             // Not a LAN host — just load locally
-            cvarManager->log("WML: Loading map locally");
+            cvarManager->log("HWM: Loading map locally");
 
             gameWrapper->SetTimeout(
                 [this, path](GameWrapper* gw) {
                     try
                     {
                         std::string cmd = "open \"" + path + "\"";
-                        cvarManager->log("WML: Executing: " + cmd);
+                        cvarManager->log("HWM: Executing: " + cmd);
                         gameWrapper->ExecuteUnrealCommand(cmd);
                     }
                     catch (...)
                     {
-                        cvarManager->log("WML: Local map load failed");
+                        cvarManager->log("HWM: Local map load failed");
                     }
                 },
                 0.5f
@@ -632,12 +635,12 @@ void WorkshopMapLoader::loadMapByPath(const std::string& path)
     catch (const std::exception& e)
     {
         cvarManager->log(
-            "WML: loadMapByPath error: " + std::string(e.what())
+            "HWM: loadMapByPath error: " + std::string(e.what())
         );
     }
     catch (...)
     {
-        cvarManager->log("WML: loadMapByPath: unknown error");
+        cvarManager->log("HWM: loadMapByPath: unknown error");
     }
 }
 
@@ -645,11 +648,11 @@ void WorkshopMapLoader::loadMapByPath(const std::string& path)
 // loadSelectedMap — Load whatever user selected in the UI
 // =============================================================================
 
-void WorkshopMapLoader::loadSelectedMap()
+void HostWorkshopMaps::loadSelectedMap()
 {
     if (selectedMapIndex < 0 || selectedMapIndex >= (int)mapFiles.size())
     {
-        cvarManager->log("WML: No map selected or invalid selection");
+        cvarManager->log("HWM: No map selected or invalid selection");
         return;
     }
 
@@ -660,7 +663,7 @@ void WorkshopMapLoader::loadSelectedMap()
 // isLanHost — Check if we're hosting a LAN match with players connected
 // =============================================================================
 
-bool WorkshopMapLoader::isLanHost()
+bool HostWorkshopMaps::isLanHost()
 {
     try
     {
