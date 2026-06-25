@@ -13,11 +13,11 @@ public:
     virtual void onLoad() override;
     virtual void onUnload() override;
 
-    // PluginWindow overrides - THESE ARE ALL REQUIRED
+    // PluginWindow overrides - ALL REQUIRED
     virtual void Render() override;
     virtual std::string GetMenuName() override;
     virtual std::string GetMenuTitle() override;
-    virtual void SetImGuiContext(uintptr_t ctx) override;  // THIS WAS MISSING!
+    virtual void SetImGuiContext(uintptr_t ctx) override;
     virtual bool ShouldBlockInput() override;
     virtual bool IsActiveOverlay() override;
     virtual void OnOpen() override;
@@ -47,6 +47,8 @@ private:
     char searchFilter[256] = {0};
     bool isWindowOpen = false;
     bool renderInitialized = false;
+    bool drawableRegistered = false;
     float scanDelay = 0.0f;
     bool pendingScan = false;
+    ImGuiContext* imguiContext = nullptr;
 };
