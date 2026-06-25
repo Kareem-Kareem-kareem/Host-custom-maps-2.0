@@ -1,14 +1,13 @@
 #include "HostworkshopMaps.h"
-#include <filesystem>
 #include <algorithm>
 #include <cctype>
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/GameEvent/ServerWrapper.h"
 
-// =============================================================================
-// PluginWindow Methods - STUB IMPLEMENTATIONS (DON'T RENDER)
-// =============================================================================
+// Plugin registration
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Workshop Maps Loader", "2.0", PLUGINTYPE_FREEPLAY)
 
+// PluginWindow interface implementations
 std::string HostWorkshopMaps::GetMenuName()
 {
     return "Workshop Maps";
@@ -16,12 +15,12 @@ std::string HostWorkshopMaps::GetMenuName()
 
 std::string HostWorkshopMaps::GetMenuTitle()
 {
-    return "Workshop Maps";
+    return "Workshop Maps Loader";
 }
 
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 {
-    // Do nothing - just satisfy the interface
+    // Empty - BakkesMod handles ImGui context
 }
 
 bool HostWorkshopMaps::ShouldBlockInput()
@@ -36,333 +35,234 @@ bool HostWorkshopMaps::IsActiveOverlay()
 
 void HostWorkshopMaps::OnOpen()
 {
-    // Do nothing
+    cvarManager->log("Workshop Maps panel opened");
 }
 
 void HostWorkshopMaps::OnClose()
 {
-    // Do nothing
+    cvarManager->log("Workshop Maps panel closed");
 }
 
 void HostWorkshopMaps::Render()
 {
-    // DO NOT RENDER ANYTHING - causes crashes
-    // This is a console-only plugin
+    // Render is called by BakkesMod if registered
+    // We keep it minimal to avoid crashes
 }
 
-// =============================================================================
-// onLoad — Register only console commands
-// =============================================================================
-
+// Plugin load - register console commands
 void HostWorkshopMaps::onLoad()
 {
-    try {
-        cvarManager->log("===================================");
-        cvarManager->log("Workshop Map Loader v2.0 loading...");
-        cvarManager->log("===================================");
-
-        // Register maps directory cvar with safe default
-        std::string defaultPath = getDefaultMapsPath();
-        cvarManager->log("Default path: " + defaultPath);
-
-        cvarManager->registerCvar(
-            "hwm_maps_directory",
-            defaultPath,
-            "Directory to scan for .upk and .udk files",
-            true,
-            true
-        );
-
-        // ===== COMMAND 1: Scan for maps =====
-        cvarManager->registerNotifier(
-            "hwm_scan",
-            [this](std::vector<std::string> params) {
-                cvarManager->log("HWM: Scanning for maps...");
-                safeScanMaps();
-            },
-            "Scan for .upk and .udk map files",
-            PERMISSION_ALL
-        );
-
-        // ===== COMMAND 2: List maps =====
-        cvarManager->registerNotifier(
-            "hwm_list",
-            [this](std::vector<std::string> params) {
-                if (mapFiles.empty()) {
-                    cvarManager->log("HWM: No maps found. Run 'hwm_scan' first.");
-                    return;
-                }
-                cvarManager->log("HWM: Found " + std::to_string(mapFiles.size()) + " maps:");
-                for (size_t i = 0; i < mapFiles.size(); i++) {
-                    cvarManager->log("  [" + std::to_string(i) + "] " + mapNames[i]);
-                }
-            },
-            "List all found maps with indices",
-            PERMISSION_ALL
-        );
-
-        // ===== COMMAND 3: Load by index =====
-        cvarManager->registerNotifier(
-            "hwm_load_index",
-            [this](std::vector<std::string> params) {
-                if (params.size() < 2) {
-                    cvarManager->log("Usage: hwm_load_index <index>");
-                    if (!mapFiles.empty()) {
-                        cvarManager->log("Available indices: 0 to " + std::to_string(mapFiles.size() - 1));
-                    }
-                    return;
-                }
-                try {
-                    int idx = std::stoi(params[1]);
-                    loadMapByIndex(idx);
-                } catch (...) {
-                    cvarManager->log("HWM: Invalid index number");
-                }
-            },
-            "Load a map by index number",
-            PERMISSION_ALL
-        );
-
-        // ===== COMMAND 4: Load by path =====
-        cvarManager->registerNotifier(
-            "hwm_load_path",
-            [this](std::vector<std::string> params) {
-                if (params.size() < 2) {
-                    cvarManager->log("Usage: hwm_load_path <full_path_to_map>");
-                    return;
-                }
-                loadMapByPath(params[1]);
-            },
-            "Load a map by full file path",
-            PERMISSION_ALL
-        );
-
-        cvarManager->log("===================================");
-        cvarManager->log("HWM: Ready!");
-        cvarManager->log("Commands:");
-        cvarManager->log("  hwm_scan          - Find maps");
-        cvarManager->log("  hwm_list          - List found maps");
-        cvarManager->log("  hwm_load_index 0  - Load a map");
-        cvarManager->log("  hwm_load_path ... - Load by path");
-        cvarManager->log("===================================");
-
-    } catch (const std::exception& e) {
-        cvarManager->log(std::string("HWM FATAL ERROR: ") + e.what());
-    } catch (...) {
-        cvarManager->log("HWM: Unknown fatal error in onLoad");
-    }
+    cvarManager->log("==== Workshop Maps Loader v2.0 ====");
+    
+    // Register the maps directory cvar
+    std::string defaultPath = getDefaultPath();
+    cvarManager->registerCvar(
+        "hwm_maps_directory",
+        defaultPath,
+        "Directory containing workshop maps",
+        true,
+        true
+    );
+    
+    cvarManager->log("Default path: " + defaultPath);
+    
+    // Register scan command
+    cvarManager->registerNotifier(
+        "hwm_scan",
+        [this](std::vector<std::string> params) {
+            cvarManager->log("Scanning for maps...");
+            scanMapsDirectory();
+            if (mapFiles.empty()) {
+                cvarManager->log("No maps found. Check hwm_maps_directory");
+            } else {
+                cvarManager->log("Found " + std::to_string(mapFiles.size()) + " maps");
+            }
+        },
+        "Scan for workshop maps",
+        PERMISSION_ALL
+    );
+    
+    // Register list command
+    cvarManager->registerNotifier(
+        "hwm_list",
+        [this](std::vector<std::string> params) {
+            if (mapFiles.empty()) {
+                cvarManager->log("No maps loaded. Run 'hwm_scan' first");
+                return;
+            }
+            cvarManager->log("=== Workshop Maps ===");
+            for (size_t i = 0; i < mapFiles.size(); i++) {
+                cvarManager->log("[" + std::to_string(i) + "] " + mapNames[i]);
+            }
+        },
+        "List loaded maps",
+        PERMISSION_ALL
+    );
+    
+    // Register load by index command
+    cvarManager->registerNotifier(
+        "hwm_load",
+        [this](std::vector<std::string> params) {
+            if (params.size() < 2) {
+                cvarManager->log("Usage: hwm_load <index>");
+                return;
+            }
+            try {
+                int index = std::stoi(params[1]);
+                loadMapByIndex(index);
+            } catch (...) {
+                cvarManager->log("Invalid index");
+            }
+        },
+        "Load map by index (hwm_list to see indices)",
+        PERMISSION_ALL
+    );
+    
+    // Register load by path command
+    cvarManager->registerNotifier(
+        "hwm_load_path",
+        [this](std::vector<std::string> params) {
+            if (params.size() < 2) {
+                cvarManager->log("Usage: hwm_load_path <path>");
+                return;
+            }
+            loadMapByPath(params[1]);
+        },
+        "Load map by file path",
+        PERMISSION_ALL
+    );
+    
+    cvarManager->log("==== Ready! ====");
+    cvarManager->log("Commands: hwm_scan, hwm_list, hwm_load");
 }
-
-// =============================================================================
-// onUnload
-// =============================================================================
 
 void HostWorkshopMaps::onUnload()
 {
-    cvarManager->log("HWM: Unloading");
+    cvarManager->log("Workshop Maps unloaded");
     mapFiles.clear();
     mapNames.clear();
 }
 
-// =============================================================================
-// safeScanMaps — Scan for map files
-// =============================================================================
-
-void HostWorkshopMaps::safeScanMaps()
+// Directory scanning
+std::string HostWorkshopMaps::getDefaultPath()
 {
+    // Try multiple common locations
+    std::vector<std::string> paths;
+    
+    // BakkesMod workshop folder
+    char* appData = nullptr;
+    size_t len = 0;
+    if (_dupenv_s(&appData, &len, "APPDATA") == 0 && appData) {
+        paths.push_back(std::string(appData) + "\\bakkesmod\\bakkesmod\\data\\workshop");
+        free(appData);
+    }
+    
+    // Steam workshop folder
+    char* progFiles = nullptr;
+    if (_dupenv_s(&progFiles, &len, "ProgramFiles(x86)") == 0 && progFiles) {
+        paths.push_back(std::string(progFiles) + "\\Steam\\steamapps\\workshop\\content\\252950");
+        free(progFiles);
+    }
+    
+    // Documents folder
+    char* docs = nullptr;
+    if (_dupenv_s(&docs, &len, "USERPROFILE") == 0 && docs) {
+        paths.push_back(std::string(docs) + "\\Documents\\rocketleague\\workshop");
+        free(docs);
+    }
+    
+    // Return first existing path
+    for (const auto& path : paths) {
+        if (std::filesystem::exists(path)) {
+            return path;
+        }
+    }
+    
+    // Return first path as default
+    return paths.empty() ? "" : paths[0];
+}
+
+void HostWorkshopMaps::scanMapsDirectory()
+{
+    mapFiles.clear();
+    mapNames.clear();
+    
+    std::string dir = cvarManager->getCvar("hwm_maps_directory").getStringValue();
+    
+    if (dir.empty()) {
+        cvarManager->log("Maps directory not set");
+        return;
+    }
+    
+    if (!std::filesystem::exists(dir)) {
+        cvarManager->log("Maps directory does not exist: " + dir);
+        return;
+    }
+    
     try {
-        mapFiles.clear();
-        mapNames.clear();
-
-        std::string mapsDir = cvarManager->getCvar("hwm_maps_directory").getStringValue();
-
-        if (mapsDir.empty()) {
-            cvarManager->log("HWM: Maps directory is empty");
-            return;
-        }
-
-        cvarManager->log("HWM: Scanning: " + mapsDir);
-
-        if (!std::filesystem::exists(mapsDir)) {
-            cvarManager->log("HWM: Directory does not exist");
-            return;
-        }
-
-        // Scan recursively
         auto options = std::filesystem::directory_options::skip_permission_denied;
-        for (const auto& entry : std::filesystem::recursive_directory_iterator(mapsDir, options)) {
-            try {
-                if (!entry.is_regular_file()) {
-                    continue;
-                }
-
-                std::string ext = entry.path().extension().string();
-                
-                // Convert to lowercase
-                std::transform(ext.begin(), ext.end(), ext.begin(),
-                              [](unsigned char c) { return std::tolower(c); });
-
-                if (ext == ".upk" || ext == ".udk") {
-                    mapFiles.push_back(entry.path().string());
-                    mapNames.push_back(entry.path().filename().string());
-                }
-            } catch (...) {
-                // Skip errors on individual files
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(dir, options)) {
+            if (!entry.is_regular_file()) continue;
+            
+            std::string ext = entry.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            
+            if (ext == ".upk" || ext == ".udk") {
+                mapFiles.push_back(entry.path().string());
+                mapNames.push_back(entry.path().filename().string());
             }
         }
-
-        cvarManager->log("HWM: Scan complete. Found " + std::to_string(mapFiles.size()) + " maps.");
-
     } catch (const std::exception& e) {
-        cvarManager->log(std::string("HWM Scan error: ") + e.what());
-    } catch (...) {
-        cvarManager->log("HWM: Scan failed");
+        cvarManager->log(std::string("Scan error: ") + e.what());
     }
 }
 
-// =============================================================================
-// getDefaultMapsPath
-// =============================================================================
-
-std::string HostWorkshopMaps::getDefaultMapsPath()
-{
-    try {
-        // Try AppData first
-        char* appData = nullptr;
-        size_t len = 0;
-        if (_dupenv_s(&appData, &len, "APPDATA") == 0 && appData) {
-            std::string path = std::string(appData) + "\\bakkesmod\\bakkesmod\\data\\workshop";
-            free(appData);
-            if (std::filesystem::exists(path)) {
-                return path;
-            }
-            return path; // Return even if doesn't exist - user might create it
-        }
-
-        // Try Steam folder
-        char* progFiles = nullptr;
-        if (_dupenv_s(&progFiles, &len, "ProgramFiles(x86)") == 0 && progFiles) {
-            std::string path = std::string(progFiles) + "\\Steam\\steamapps\\workshop\\content\\252950";
-            free(progFiles);
-            if (std::filesystem::exists(path)) {
-                return path;
-            }
-        }
-
-        // Try Documents
-        char* userProfile = nullptr;
-        if (_dupenv_s(&userProfile, &len, "USERPROFILE") == 0 && userProfile) {
-            std::string path = std::string(userProfile) + "\\Documents\\rocketleague\\workshop";
-            free(userProfile);
-            if (std::filesystem::exists(path)) {
-                return path;
-            }
-        }
-
-        // Default fallback
-        return "C:\\workshop";
-
-    } catch (...) {
-        return "C:\\workshop";
-    }
-}
-
-// =============================================================================
-// loadMapByIndex
-// =============================================================================
-
+// Map loading
 void HostWorkshopMaps::loadMapByIndex(int index)
 {
     if (index < 0 || index >= (int)mapFiles.size()) {
-        cvarManager->log("HWM: Invalid index " + std::to_string(index) + 
-                        " (valid range: 0-" + std::to_string(mapFiles.size() - 1) + ")");
+        cvarManager->log("Invalid index: " + std::to_string(index));
         return;
     }
-
     loadMapByPath(mapFiles[index]);
 }
 
-// =============================================================================
-// loadMapByPath — Load a map file
-// =============================================================================
-
 void HostWorkshopMaps::loadMapByPath(const std::string& path)
 {
-    try {
-        if (path.empty()) {
-            cvarManager->log("HWM: Empty path");
-            return;
-        }
-
-        if (!std::filesystem::exists(path)) {
-            cvarManager->log("HWM: File not found: " + path);
-            return;
-        }
-
-        cvarManager->log("HWM: Loading map: " + path);
-
-        if (isLanHost()) {
-            cvarManager->log("HWM: LAN host detected - using servertravel");
-            gameWrapper->SetTimeout(
-                [this, path](GameWrapper* gw) {
-                    try {
-                        gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
-                        cvarManager->log("HWM: ServerTravel executed");
-                    } catch (...) {
-                        cvarManager->log("HWM: ServerTravel failed");
-                    }
-                },
-                1.0f
-            );
-        } else {
-            cvarManager->log("HWM: Not LAN host - loading locally");
-            gameWrapper->SetTimeout(
-                [this, path](GameWrapper* gw) {
-                    try {
-                        gameWrapper->ExecuteUnrealCommand("open \"" + path + "\"");
-                        cvarManager->log("HWM: Open command executed");
-                    } catch (...) {
-                        cvarManager->log("HWM: Open command failed");
-                    }
-                },
-                0.5f
-            );
-        }
-
-    } catch (const std::exception& e) {
-        cvarManager->log(std::string("HWM Load error: ") + e.what());
-    } catch (...) {
-        cvarManager->log("HWM: Load failed");
+    if (!std::filesystem::exists(path)) {
+        cvarManager->log("Map not found: " + path);
+        return;
+    }
+    
+    cvarManager->log("Loading map: " + path);
+    
+    if (isLanHost()) {
+        cvarManager->log("LAN host detected - using servertravel");
+        gameWrapper->SetTimeout(
+            [this, path](GameWrapper* gw) {
+                gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
+            },
+            1.0f
+        );
+    } else {
+        cvarManager->log("Loading locally");
+        gameWrapper->SetTimeout(
+            [this, path](GameWrapper* gw) {
+                gameWrapper->ExecuteUnrealCommand("open \"" + path + "\"");
+            },
+            0.5f
+        );
     }
 }
-
-// =============================================================================
-// isLanHost — Check if hosting LAN match
-// =============================================================================
 
 bool HostWorkshopMaps::isLanHost()
 {
     try {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
-
-        if (server.IsNull()) {
-            return false;
-        }
-
-        if (!server.HasAuthority()) {
-            return false;
-        }
-
-        auto members = server.GetPRIs();
-        return members.Count() > 1;
-
+        if (server.IsNull()) return false;
+        if (!server.HasAuthority()) return false;
+        return server.GetPRIs().Count() > 1;
     } catch (...) {
         return false;
     }
 }
-
-// =============================================================================
-// Export the plugin
-// =============================================================================
-
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Workshop Map Loader", "2.0", PLUGINTYPE_FREEPLAY)
