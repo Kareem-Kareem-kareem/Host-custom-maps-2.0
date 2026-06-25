@@ -1,8 +1,8 @@
 #include "HostworkshopMaps.h"
+#include <imgui.h>
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Workshop Maps", "2.0", PLUGINTYPE_FREEPLAY)
 
-// PluginWindow interface
 std::string HostWorkshopMaps::GetMenuName() { return "Workshop Maps"; }
 std::string HostWorkshopMaps::GetMenuTitle() { return "Workshop Maps"; }
 
@@ -15,12 +15,17 @@ bool HostWorkshopMaps::IsActiveOverlay() { return false; }
 void HostWorkshopMaps::OnOpen() { isWindowOpen = true; }
 void HostWorkshopMaps::OnClose() { isWindowOpen = false; }
 
-// Feature 2: Basic ImGui Render
 void HostWorkshopMaps::Render() {
     if (!isWindowOpen) return;
     
+    // Feature 5: UI Styling
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 10.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.1f, 0.1f, 0.1f, 0.95f));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.4f, 0.8f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.3f, 0.5f, 0.9f, 1.0f));
+    
     if (ImGui::Begin(GetMenuTitle().c_str(), &isWindowOpen, ImGuiWindowFlags_None)) {
-        if (ImGui::Button("Scan Maps")) {
+        if (ImGui::Button("Scan Maps", ImVec2(120, 0))) {
             scanMapsDirectory();
         }
         
@@ -38,57 +43,38 @@ void HostWorkshopMaps::Render() {
             ImGui::EndChild();
             
             if (selectedMapIndex >= 0 && selectedMapIndex < (int)mapFiles.size()) {
-                if (ImGui::Button("Load Selected Map")) {
+                if (ImGui::Button("Load Selected Map", ImVec2(150, 0))) {
+                    loadMap(mapFiles[selectedMapIndex]);
+                }
+                
+                ImGui::SameLine();
+                
+                // Feature 6: Multiplayer Hook UI trigger
+                if (ImGui::Button("Host Map for Party", ImVec2(150, 0))) {
+                    sendMapToParty(mapNames[selectedMapIndex]);
                     loadMap(mapFiles[selectedMapIndex]);
                 }
             }
         }
     }
     ImGui::End();
+    
+    // Pop the styles we pushed
+    ImGui::PopStyleColor(3);
+    ImGui::PopStyleVar();
 }
 
 void HostWorkshopMaps::registerCommands() {
-    cvarManager->registerNotifier(
-        "hwm_scan",
-        [this](std::vector<std::string> params) { scanMapsDirectory(); },
-        "Scan for maps",
-        PERMISSION_ALL
-    );
-
-    cvarManager->registerNotifier(
-        "hwm_list",
-        [this](std::vector<std::string> params) {
-            if (mapFiles.empty()) {
-                cvarManager->log("HWM: No maps found");
-                return;
-            }
-            cvarManager->log("HWM: Found " + std::to_string(mapFiles.size()) + " maps");
-            for (size_t i = 0; i < mapNames.size(); i++) {
-                cvarManager->log(" [" + std::to_string(i) + "] " + mapNames[i]);
-            }
-        },
-        "List maps",
-        PERMISSION_ALL
-    );
-    
-    // Command for Feature 1
-    cvarManager->registerNotifier(
-        "hwm_load",
-        [this](std::vector<std::string> params) {
-            if (params.size() < 2) {
-                cvarManager->log("Usage: hwm_load <index>");
-                return;
-            }
-            int idx = std::stoi(params[1]);
-            if (idx >= 0 && idx < (int)mapFiles.size()) {
-                loadMap(mapFiles[idx]);
-            } else {
-                cvarManager->log("Invalid map index");
-            }
-        },
-        "Load a map by index",
-        PERMISSION_ALL
-    );
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string> params) { scanMapsDirectory(); }, "Scan for maps", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string> params) {
+        if (mapFiles.empty()) { cvarManager->log("HWM: No maps found"); return; }
+        for (size_t i = 0; i < mapNames.size(); i++) { cvarManager->log(" [" + std::to_string(i) + "] " + mapNames[i]); }
+    }, "List maps", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params) {
+        if (params.size() < 2) return;
+        int idx = std::stoi(params[1]);
+        if (idx >= 0 && idx < (int)mapFiles.size()) loadMap(mapFiles[idx]);
+    }, "Load a map by index", PERMISSION_ALL);
 }
 
 std::string HostWorkshopMaps::getDefaultPath() {
@@ -103,52 +89,63 @@ void HostWorkshopMaps::scanMapsDirectory() {
     mapFiles.clear();
     mapNames.clear();
     std::string dir = getDefaultPath();
-    if (dir.empty()) {
-        cvarManager->log("HWM: No directory");
-        return;
-    }
-    DWORD attr = GetFileAttributesA(dir.c_str());
-    if (attr == INVALID_FILE_ATTRIBUTES) {
-        cvarManager->log("HWM: Directory not found: " + dir);
-        return;
-    }
-    cvarManager->log("HWM: Scanning: " + dir);
+    if (dir.empty()) return;
 
     WIN32_FIND_DATAA fd;
     HANDLE hFind = FindFirstFileA((dir + "\\*").c_str(), &fd);
-    if (hFind == INVALID_HANDLE_VALUE) {
-        cvarManager->log("HWM: Scan failed");
-        return;
-    }
+    if (hFind == INVALID_HANDLE_VALUE) return;
+    
     do {
         std::string name = fd.cFileName;
         if (name == "." || name == "..") continue;
         
         if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            std::string fullPath = dir + "\\" + name;
-            mapFiles.push_back(fullPath);
-            mapNames.push_back(name);
+            if (name.find(".upk") != std::string::npos || name.find(".udk") != std::string::npos) {
+                mapFiles.push_back(dir + "\\" + name);
+                mapNames.push_back(cleanMapName(name));
+            }
         }
     } while (FindNextFileA(hFind, &fd));
     FindClose(hFind);
-    cvarManager->log("HWM: Found " + std::to_string(mapFiles.size()) + " items");
 }
 
-// Feature 1: Map Loading implementation
+std::string HostWorkshopMaps::cleanMapName(const std::string& filename) {
+    std::string clean = filename;
+    size_t lastDot = clean.find_last_of(".");
+    if (lastDot != std::string::npos) clean = clean.substr(0, lastDot);
+    for (size_t i = 0; i < clean.length(); ++i) { if (clean[i] == '_') clean[i] = ' '; }
+    return clean;
+}
+
 void HostWorkshopMaps::loadMap(const std::string& path) {
     cvarManager->log("HWM: Loading map " + path);
-    // Escape the backslashes or just execute standard load_workshop command
     cvarManager->executeCommand("load_workshop \"" + path + "\"");
+}
+
+// Feature 6: Multiplayer Hooks
+void HostWorkshopMaps::onJoinParty() {
+    cvarManager->log("HWM: Joined party!");
+}
+
+void HostWorkshopMaps::sendMapToParty(const std::string& mapName) {
+    cvarManager->log("HWM: Sending map info to party: " + mapName);
+    // Networking implementation to transmit map ID goes here
 }
 
 void HostWorkshopMaps::onLoad() {
     cvarManager->log("HWM: Loading v2.0");
     registerCommands();
-    cvarManager->log("HWM: Ready - use hwm_scan, hwm_list, hwm_load, or F3 menu");
+    
+    // Hook into party joined event
+    gameWrapper->HookEvent("Function TAGame.Party_TA.OnPartyJoined", std::bind(&HostWorkshopMaps::onJoinParty, this));
+    
+    cvarManager->log("HWM: Ready");
 }
 
 void HostWorkshopMaps::onUnload() {
     mapFiles.clear();
     mapNames.clear();
+    // Unhook event cleanly
+    gameWrapper->UnhookEvent("Function TAGame.Party_TA.OnPartyJoined");
     cvarManager->log("HWM: Unloaded");
 }
