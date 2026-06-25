@@ -2,15 +2,19 @@
 
 #include <vector>
 #include <string>
+#include <windows.h>
 #include "bakkesmod/plugin/bakkesmodplugin.h"
 #include "bakkesmod/plugin/pluginwindow.h"
 
-class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin, public BakkesMod::Plugin::PluginWindow
-{
+// FEATURE SET 1: We will add ImGui UI and Map Loading functionality.
+// This is the first step of adding features "2 by 2" to ensure stability.
+
+class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin, public BakkesMod::Plugin::PluginWindow {
 public:
     virtual void onLoad() override;
     virtual void onUnload() override;
-
+    
+    // ImGui PluginWindow interface
     virtual void Render() override;
     virtual std::string GetMenuName() override;
     virtual std::string GetMenuTitle() override;
@@ -21,13 +25,19 @@ public:
     virtual void OnClose() override;
 
 private:
-    // Feature 1+2: CVars and notifiers
+    // Base Feature: CVars and notifiers
     void registerCommands();
-    
-    // Feature 3+4: Directory scanning (basic)
+
+    // Base Feature: Directory scanning (basic)
     void scanMapsDirectory();
     std::string getDefaultPath();
-
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
+
+    // Feature 1: Map Loading
+    void loadMap(const std::string& path);
+    
+    // Feature 2: Basic ImGui State
+    bool isWindowOpen = false;
+    int selectedMapIndex = -1;
 };
