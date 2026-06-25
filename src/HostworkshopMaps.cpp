@@ -4,9 +4,7 @@
 #include <algorithm>
 #include <cctype>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.7", PLUGINTYPE_FREEPLAY)
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.8", PLUGINTYPE_FREEPLAY)
 
 std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
 {
@@ -59,19 +57,18 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out)
     FindClose(h);
 }
 
-// ─── onLoad ──────────────────────────────────────────────────────────────────
-
 void HostWorkshopMaps::onLoad()
 {
     cvarManager->registerCvar("hwm_maps_directory", "", "Maps folder", true);
 
-    cvarManager->registerNotifier("hwm_open", [this](std::vector<std::string>) {
-        isWindowOpen_ = !isWindowOpen_;
-    }, "Toggle Host Workshop Maps window", PERMISSION_ALL);
-
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) {
         ScanMaps();
     }, "Scan maps directory", PERMISSION_ALL);
+
+    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>) {
+        for (int i = 0; i < (int)mapList_.size(); ++i)
+            cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName);
+    }, "List maps in console", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> args) {
         if (args.size() < 2) {
@@ -83,54 +80,41 @@ void HostWorkshopMaps::onLoad()
             selectedIndex_ = idx;
             LoadMapPath(mapList_[idx].fullPath);
         }
-    }, "Load map by index (or selected)", PERMISSION_ALL);
+    }, "Load map by index", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_next", [this](std::vector<std::string>) {
         if (mapList_.empty()) return;
         selectedIndex_ = (selectedIndex_ + 1) % mapList_.size();
-        SetStatus("Selected: " + mapList_[selectedIndex_].displayName);
+        SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
     }, "Select next map", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_prev", [this](std::vector<std::string>) {
         if (mapList_.empty()) return;
         selectedIndex_ = (selectedIndex_ - 1 + mapList_.size()) % mapList_.size();
-        SetStatus("Selected: " + mapList_[selectedIndex_].displayName);
+        SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
     }, "Select previous map", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>) {
-        for (int i = 0; i < (int)mapList_.size(); ++i)
-            cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName);
-    }, "List all maps in console", PERMISSION_ALL);
 
     gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
         [this](std::string e) { OnTick(e); });
-
-    gameWrapper->RegisterDrawable([this](CanvasWrapper canvas) {
-        OnRender(canvas);
-    });
 
     gameWrapper->SetTimeout([this](GameWrapper*) {
         mapsDirectory_ = SanitizePath(
             cvarManager->getCvar("hwm_maps_directory").getStringValue());
         if (!mapsDirectory_.empty()) ScanMaps();
-        else SetStatus("Set hwm_maps_directory and run hwm_scan");
+        else SetStatus("Set hwm_maps_directory then run hwm_scan");
     }, 5.0f);
 
-    cvarManager->log("HostWorkshopMaps: loaded — hwm_open to show overlay, hwm_scan to scan, hwm_load to load selected");
+    cvarManager->log("HostWorkshopMaps: loaded");
 }
 
 void HostWorkshopMaps::onUnload()
 {
     gameWrapper->UnhookEvent("Function TAGame.Car_TA.SetVehicleInput");
-    gameWrapper->UnregisterDrawables();
 }
-
-// ─── ScanMaps ────────────────────────────────────────────────────────────────
 
 void HostWorkshopMaps::ScanMaps()
 {
-    mapList_.clear();
-    selectedIndex_ = 0;
+    mapList_.clear(); selectedIndex_ = 0;
     if (mapsDirectory_.empty()) { SetStatus("No directory set"); return; }
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -141,8 +125,6 @@ void HostWorkshopMaps::ScanMaps()
         [](const MapEntry& a, const MapEntry& b){ return a.displayName < b.displayName; });
     SetStatus(std::to_string(mapList_.size()) + " maps found");
 }
-
-// ─── LoadMapPath ─────────────────────────────────────────────────────────────
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
@@ -185,62 +167,4 @@ void HostWorkshopMaps::OnTick(std::string)
     pendingLANTransport_ = false;
     TeleportLANPlayers(pendingMapPath_);
     pendingMapPath_.clear();
-}
-
-// ─── Canvas overlay (no ImGui) ───────────────────────────────────────────────
-
-void HostWorkshopMaps::OnRender(CanvasWrapper canvas)
-{
-    if (!isWindowOpen_) return;
-
-    // Background panel
-    canvas.SetColor(LinearColor{0, 0, 0, 200});
-    canvas.DrawRect(Vector2F{50, 50}, Vector2F{700, 500});
-
-    // Title
-    canvas.SetColor(LinearColor{255, 255, 255, 255});
-    canvas.SetPosition(Vector2F{60, 60});
-    canvas.DrawString("HOST WORKSHOP MAPS", 2.0f, 2.0f);
-
-    // Status
-    canvas.SetColor(LinearColor{180, 180, 180, 255});
-    canvas.SetPosition(Vector2F{60, 100});
-    canvas.DrawString(statusMsg_.empty() ? "Ready" : statusMsg_);
-
-    // Separator
-    canvas.SetColor(LinearColor{100, 100, 100, 255});
-    canvas.DrawRect(Vector2F{60, 120}, Vector2F{690, 121});
-
-    // Map list (show up to 15)
-    int start = std::max(0, selectedIndex_ - 7);
-    int end   = std::min((int)mapList_.size(), start + 15);
-
-    for (int i = start; i < end; ++i) {
-        float y = 130.0f + (i - start) * 22.0f;
-        bool sel = (i == selectedIndex_);
-
-        if (sel) {
-            canvas.SetColor(LinearColor{30, 100, 200, 180});
-            canvas.DrawRect(Vector2F{60, y - 1}, Vector2F{690, y + 20});
-        }
-
-        canvas.SetColor(sel ? LinearColor{255, 255, 255, 255} : LinearColor{200, 200, 200, 255});
-        canvas.SetPosition(Vector2F{65, y});
-        canvas.DrawString(mapList_[i].displayName);
-
-        canvas.SetColor(LinearColor{120, 120, 120, 255});
-        canvas.SetPosition(Vector2F{630, y});
-        canvas.DrawString("." + mapList_[i].extension);
-    }
-
-    if (mapList_.empty()) {
-        canvas.SetColor(LinearColor{150, 150, 150, 255});
-        canvas.SetPosition(Vector2F{65, 150});
-        canvas.DrawString("No maps found. Run: hwm_maps_directory <path>  then  hwm_scan");
-    }
-
-    // Controls hint
-    canvas.SetColor(LinearColor{120, 120, 120, 255});
-    canvas.SetPosition(Vector2F{60, 470});
-    canvas.DrawString("hwm_next / hwm_prev = navigate    hwm_load = load selected    hwm_open = close");
 }
