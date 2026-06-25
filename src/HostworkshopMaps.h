@@ -1,11 +1,8 @@
 #pragma once
 #include "bakkesmod/plugin/bakkesmodplugin.h"
-#include "bakkesmod/plugin/pluginwindow.h"
 #include <string>
 #include <vector>
-#include <filesystem>
-
-namespace fs = std::filesystem;
+#include <Windows.h>
 
 struct MapEntry {
     std::string displayName;
@@ -13,21 +10,12 @@ struct MapEntry {
     std::string extension;
 };
 
-class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
-                          public BakkesMod::Plugin::PluginWindow
+// No PluginWindow inheritance — we render via HookEvent on the DX present hook
+class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin
 {
 public:
     void onLoad()   override;
     void onUnload() override;
-
-    void        Render()       override;
-    std::string GetMenuName()  override { return "hostworkshopmaps"; }
-    std::string GetMenuTitle() override { return "Host Workshop Maps"; }
-    void        SetImGuiContext(uintptr_t ctx) override;
-    bool        ShouldBlockInput()  override { return isWindowOpen_; }
-    bool        IsActiveOverlay()   override { return isWindowOpen_; }
-    void        OnOpen()  override { isWindowOpen_ = true;  if (autoScanOnOpen_) ScanMaps(); }
-    void        OnClose() override { isWindowOpen_ = false; }
 
 private:
     bool isWindowOpen_ = false;
@@ -51,6 +39,7 @@ private:
     void LoadMapPath(const std::string& path);
     void TeleportLANPlayers(const std::string& mapPath);
     void OnTick(std::string eventName);
+    void OnRender(CanvasWrapper canvas);
     void SetStatus(const std::string& msg);
 
     static std::string SanitizePath(const std::string& raw);
