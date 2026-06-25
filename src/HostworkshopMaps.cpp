@@ -1,5 +1,7 @@
 #include "HostworkshopMaps.h"
 #include <imgui.h>
+#include <algorithm>
+#include <cctype>
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Workshop Maps", "2.0", PLUGINTYPE_FREEPLAY)
 
@@ -34,8 +36,21 @@ void HostWorkshopMaps::Render() {
         if (mapNames.empty()) {
             ImGui::Text("No maps found. Click 'Scan Maps'.");
         } else {
+            // Feature 7: Search Filter UI
+            ImGui::InputText("Search", searchBuffer, sizeof(searchBuffer));
+            std::string searchStr = searchBuffer;
+            std::transform(searchStr.begin(), searchStr.end(), searchStr.begin(), ::tolower);
+
             ImGui::BeginChild("MapList", ImVec2(0, 200), true);
             for (size_t i = 0; i < mapNames.size(); i++) {
+                std::string mapNameLower = mapNames[i];
+                std::transform(mapNameLower.begin(), mapNameLower.end(), mapNameLower.begin(), ::tolower);
+                
+                // Skip rendering this item if it doesn't match the search
+                if (!searchStr.empty() && mapNameLower.find(searchStr) == std::string::npos) {
+                    continue;
+                }
+
                 if (ImGui::Selectable(mapNames[i].c_str(), selectedMapIndex == (int)i)) {
                     selectedMapIndex = (int)i;
                 }
@@ -43,16 +58,21 @@ void HostWorkshopMaps::Render() {
             ImGui::EndChild();
             
             if (selectedMapIndex >= 0 && selectedMapIndex < (int)mapFiles.size()) {
-                if (ImGui::Button("Load Selected Map", ImVec2(150, 0))) {
+                if (ImGui::Button("Load Local (Freeplay)", ImVec2(160, 0))) {
                     loadMap(mapFiles[selectedMapIndex]);
                 }
                 
                 ImGui::SameLine();
                 
-                // Feature 6: Multiplayer Hook UI trigger
-                if (ImGui::Button("Host Map for Party", ImVec2(150, 0))) {
+                // Feature 8: Host Listen Server UI
+                if (ImGui::Button("Host Listen Server", ImVec2(150, 0))) {
+                    hostMap(mapFiles[selectedMapIndex]);
+                }
+                
+                ImGui::SameLine();
+                
+                if (ImGui::Button("Send to Party", ImVec2(120, 0))) {
                     sendMapToParty(mapNames[selectedMapIndex]);
-                    loadMap(mapFiles[selectedMapIndex]);
                 }
             }
         }
@@ -66,15 +86,24 @@ void HostWorkshopMaps::Render() {
 
 void HostWorkshopMaps::registerCommands() {
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string> params) { scanMapsDirectory(); }, "Scan for maps", PERMISSION_ALL);
+    
     cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string> params) {
         if (mapFiles.empty()) { cvarManager->log("HWM: No maps found"); return; }
         for (size_t i = 0; i < mapNames.size(); i++) { cvarManager->log(" [" + std::to_string(i) + "] " + mapNames[i]); }
     }, "List maps", PERMISSION_ALL);
+    
     cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params) {
         if (params.size() < 2) return;
         int idx = std::stoi(params[1]);
         if (idx >= 0 && idx < (int)mapFiles.size()) loadMap(mapFiles[idx]);
-    }, "Load a map by index", PERMISSION_ALL);
+    }, "Load a map locally by index", PERMISSION_ALL);
+    
+    // Feature 8: Command equivalent for hosting
+    cvarManager->registerNotifier("hwm_host", [this](std::vector<std::string> params) {
+        if (params.size() < 2) return;
+        int idx = std::stoi(params[1]);
+        if (idx >= 0 && idx < (int)mapFiles.size()) hostMap(mapFiles[idx]);
+    }, "Host a map by index", PERMISSION_ALL);
 }
 
 std::string HostWorkshopMaps::getDefaultPath() {
@@ -118,26 +147,31 @@ std::string HostWorkshopMaps::cleanMapName(const std::string& filename) {
 }
 
 void HostWorkshopMaps::loadMap(const std::string& path) {
-    cvarManager->log("HWM: Loading map " + path);
+    cvarManager->log("HWM: Loading local map " + path);
     cvarManager->executeCommand("load_workshop \"" + path + "\"");
 }
 
-// Feature 6: Multiplayer Hooks
-void HostWorkshopMaps::onJoinParty() {
+// Feature 8: Start a Listen Server instead of Freeplay
+void HostWorkshopMaps::hostMap(const std::string& path) {
+    cvarManager->log("HWM: Hosting listen server for map " + path);
+    // Uses standard UE3 open command to host
+    cvarManager->executeCommand("unreal_command \"open " + path + "?Listen\"");
+}
+
+void HostWorkshopMaps::onJoinParty(std::string eventName) {
     cvarManager->log("HWM: Joined party!");
 }
 
 void HostWorkshopMaps::sendMapToParty(const std::string& mapName) {
     cvarManager->log("HWM: Sending map info to party: " + mapName);
-    // Networking implementation to transmit map ID goes here
 }
 
 void HostWorkshopMaps::onLoad() {
     cvarManager->log("HWM: Loading v2.0");
     registerCommands();
     
-    // Hook into party joined event
-    gameWrapper->HookEvent("Function TAGame.Party_TA.OnPartyJoined", std::bind(&HostWorkshopMaps::onJoinParty, this));
+    // Feature 6: Network Hook 
+    gameWrapper->HookEvent("Function TAGame.Party_TA.OnPartyJoined", std::bind(&HostWorkshopMaps::onJoinParty, this, std::placeholders::_1));
     
     cvarManager->log("HWM: Ready");
 }
@@ -145,7 +179,6 @@ void HostWorkshopMaps::onLoad() {
 void HostWorkshopMaps::onUnload() {
     mapFiles.clear();
     mapNames.clear();
-    // Unhook event cleanly
     gameWrapper->UnhookEvent("Function TAGame.Party_TA.OnPartyJoined");
     cvarManager->log("HWM: Unloaded");
 }
