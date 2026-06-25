@@ -4,8 +4,9 @@
 #include "imgui.h"
 #include <algorithm>
 #include <cctype>
+#include <Windows.h>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.3", PLUGINTYPE_FREEPLAY)
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.4", PLUGINTYPE_FREEPLAY)
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -13,13 +14,16 @@ std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
 {
     std::string out = raw;
     for (char& c : out) if (c == '\\') c = '/';
-    while (!out.empty() && (out.back() == '/' || out.back() == '\\')) out.pop_back();
+    while (!out.empty() && out.back() == '/') out.pop_back();
     return out;
 }
 
 std::string HostWorkshopMaps::MapNameFromPath(const std::string& path)
 {
-    return fs::path(path).stem().string();
+    size_t slash = path.find_last_of("/\\");
+    std::string filename = (slash == std::string::npos) ? path : path.substr(slash + 1);
+    size_t dot = filename.find_last_of('.');
+    return (dot == std::string::npos) ? filename : filename.substr(0, dot);
 }
 
 void HostWorkshopMaps::SetStatus(const std::string& msg)
@@ -42,18 +46,56 @@ std::vector<MapEntry> HostWorkshopMaps::FilteredMaps() const
     return out;
 }
 
+// ─── Windows API directory walker (no std::filesystem) ───────────────────────
+
+static void WalkDir(const std::string& dir, std::vector<MapEntry>& out)
+{
+    std::string pattern = dir + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE hFind = FindFirstFileA(pattern.c_str(), &fd);
+    if (hFind == INVALID_HANDLE_VALUE) return;
+
+    do {
+        if (strcmp(fd.cFileName, ".") == 0 || strcmp(fd.cFileName, "..") == 0) continue;
+
+        std::string fullPath = dir + "\\" + fd.cFileName;
+
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+            WalkDir(fullPath, out); // recurse
+        } else {
+            // Check extension
+            std::string name = fd.cFileName;
+            size_t dot = name.find_last_of('.');
+            if (dot == std::string::npos) continue;
+            std::string ext = name.substr(dot + 1);
+            std::transform(ext.begin(), ext.end(), ext.begin(),
+                [](unsigned char c){ return std::tolower(c); });
+
+            if (ext == "upk" || ext == "udk") {
+                MapEntry me;
+                me.extension   = ext;
+                me.fullPath    = fullPath;
+                // Convert to forward slashes
+                for (char& c : me.fullPath) if (c == '\\') c = '/';
+                me.displayName = name.substr(0, dot);
+                out.push_back(me);
+            }
+        }
+    } while (FindNextFileA(hFind, &fd));
+
+    FindClose(hFind);
+}
+
 // ─── onLoad ─────────────────────────────────────────────────────────────────
 
 void HostWorkshopMaps::onLoad()
 {
-    // ── CVars ── register only, NO filesystem work here ─────────────────
     cvarManager->registerCvar("hwm_maps_directory", "",
         "Folder to scan for .upk/.udk maps", true, false, 0, false, 0, true);
 
     cvarManager->registerCvar("hwm_auto_scan", "1",
         "Auto-scan when window opens", true, true, 0, true, 1, true);
 
-    // ── Notifiers ────────────────────────────────────────────────────────
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) {
         ScanMaps();
     }, "Scan maps directory", PERMISSION_ALL);
@@ -65,27 +107,20 @@ void HostWorkshopMaps::onLoad()
         LoadMapPath(SanitizePath(path));
     }, "Load map by path", PERMISSION_ALL);
 
-    // ── Tick hook ────────────────────────────────────────────────────────
     gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
         [this](std::string e) { OnTick(e); });
 
-    // ── Read cvars AFTER everything is registered ────────────────────────
-    // Use SetTimeout so we read saved values after BM finishes loading cfg
+    // Read saved cvars and scan after BM finishes loading config
     gameWrapper->SetTimeout([this](GameWrapper*) {
         mapsDirectory_ = SanitizePath(
             cvarManager->getCvar("hwm_maps_directory").getStringValue());
         autoScanOnOpen_ = cvarManager->getCvar("hwm_auto_scan").getBoolValue();
-
-        // Sync dir buffer for the UI
         strncpy_s(dirBuf_, mapsDirectory_.c_str(), sizeof(dirBuf_) - 1);
+        if (!mapsDirectory_.empty()) ScanMaps();
+        else SetStatus("Set a maps directory and click Scan");
+    }, 5.0f); // 5 seconds — well after main menu is ready
 
-        if (!mapsDirectory_.empty())
-            ScanMaps();
-        else
-            SetStatus("Set a maps directory and click Scan");
-    }, 3.0f);
-
-    cvarManager->log("HostWorkshopMaps: loaded — press F6 or use togglemenu hostworkshopmaps");
+    cvarManager->log("HostWorkshopMaps: loaded");
 }
 
 void HostWorkshopMaps::onUnload()
@@ -100,31 +135,19 @@ void HostWorkshopMaps::ScanMaps()
     mapList_.clear();
     selectedIndex_ = -1;
 
-    if (mapsDirectory_.empty()) { SetStatus("No directory set — enter one above and click Apply"); return; }
-
-    fs::path dir(mapsDirectory_);
-    if (!fs::exists(dir)) { SetStatus("Directory not found: " + mapsDirectory_); return; }
-
-    try {
-        for (auto& entry : fs::recursive_directory_iterator(
-                dir, fs::directory_options::skip_permission_denied))
-        {
-            if (!entry.is_regular_file()) continue;
-            std::string ext = entry.path().extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(),
-                [](unsigned char c){ return std::tolower(c); });
-            if (ext == ".upk" || ext == ".udk") {
-                MapEntry me;
-                me.extension   = ext.substr(1);
-                me.fullPath    = SanitizePath(entry.path().string());
-                me.displayName = MapNameFromPath(me.fullPath);
-                mapList_.push_back(me);
-            }
-        }
-    } catch (const std::exception& ex) {
-        SetStatus(std::string("Scan error: ") + ex.what());
+    if (mapsDirectory_.empty()) {
+        SetStatus("No directory set");
         return;
     }
+
+    // Check directory exists using Windows API only
+    DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        SetStatus("Directory not found: " + mapsDirectory_);
+        return;
+    }
+
+    WalkDir(mapsDirectory_, mapList_);
 
     std::sort(mapList_.begin(), mapList_.end(),
         [](const MapEntry& a, const MapEntry& b){ return a.displayName < b.displayName; });
@@ -138,7 +161,12 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
 {
     if (path.empty()) { SetStatus("No map selected"); return; }
 
-    if (!fs::exists(fs::path(path))) { SetStatus("File not found: " + path); return; }
+    // Check file exists via Windows API
+    DWORD attr = GetFileAttributesA(path.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES) {
+        SetStatus("File not found: " + path);
+        return;
+    }
 
     // Check for LAN host with remote players
     if (gameWrapper->IsInGame()) {
@@ -161,7 +189,6 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path)
     }
 
     SetStatus("Loading: " + MapNameFromPath(path));
-    // load_workshop_map is BakkesMod's built-in command for .upk/.udk files
     cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
 }
 
@@ -240,21 +267,16 @@ void HostWorkshopMaps::Render()
         for (int i = 0; i < (int)filtered.size(); ++i) {
             auto& m = filtered[i];
             bool sel = (selectedIndex_ == i);
-
             if (sel) ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.2f, 0.6f, 1.0f, 0.4f));
-
             std::string label = m.displayName + "##" + std::to_string(i);
             if (ImGui::Selectable(label.c_str(), sel, ImGuiSelectableFlags_AllowDoubleClick)) {
                 selectedIndex_ = i;
                 if (ImGui::IsMouseDoubleClicked(0))
                     LoadMapPath(filtered[i].fullPath);
             }
-
             if (sel) ImGui::PopStyleColor();
-
             ImGui::SameLine(ImGui::GetContentRegionAvail().x - 30);
             ImGui::TextDisabled(".%s", m.extension.c_str());
-
             if (ImGui::IsItemHovered())
                 ImGui::SetTooltip("%s", m.fullPath.c_str());
         }
@@ -272,7 +294,6 @@ void HostWorkshopMaps::Render()
 
     ImGui::SameLine();
 
-    // LAN status
     if (pendingLANTransport_) {
         ImGui::TextColored(ImVec4(1,0.8f,0,1), "Teleporting LAN players... (%d)", transportCountdown_);
     } else if (gameWrapper->IsInGame()) {
