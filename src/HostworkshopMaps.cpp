@@ -24,6 +24,11 @@ std::string HostWorkshopMaps::GetMenuTitle()
     return "Host Workshop Maps 2.0";
 }
 
+void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
+{
+    ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
+}
+
 bool HostWorkshopMaps::ShouldBlockInput()
 {
     return true;
@@ -47,11 +52,6 @@ void HostWorkshopMaps::OnOpen()
 void HostWorkshopMaps::OnClose()
 {
     isWindowOpen = false;
-}
-
-void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
-{
-    ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
 }
 
 // =============================================================================
