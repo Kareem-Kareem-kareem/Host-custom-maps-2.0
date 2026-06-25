@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <functional>
 #include <windows.h>
 #include "bakkesmod/plugin/bakkesmodplugin.h"
 #include "bakkesmod/plugin/pluginwindow.h"
@@ -36,6 +37,10 @@ private:
     int selectedMapIndex = -1;
 
     // Feature 5 & 6: Multiplayer Hooks
-    void onJoinParty();
+    void onJoinParty(std::string eventName);
     void sendMapToParty(const std::string& mapName);
+
+    // Feature 7 & 8: Search Filter & Host Listen Server
+    char searchBuffer[256] = "";
+    void hostMap(const std::string& path);
 };
