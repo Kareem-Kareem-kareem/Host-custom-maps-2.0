@@ -5,7 +5,6 @@
 #include <windows.h>
 #include "bakkesmod/plugin/bakkesmodplugin.h"
 #include "bakkesmod/plugin/pluginwindow.h"
-#include "imgui.h"
 
 // FEATURE SET 1: We will add ImGui UI and Map Loading functionality.
 // This is the first step of adding features "2 by 2" to ensure stability.
@@ -42,4 +41,3 @@ private:
     bool isWindowOpen = false;
     int selectedMapIndex = -1;
 };
-
