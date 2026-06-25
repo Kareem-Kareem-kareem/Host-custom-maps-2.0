@@ -1,4 +1,4 @@
-#include "HostWorkshopMaps.h"
+#include "HostworkshopMaps.h"
 
 #include <algorithm>
 #include <cctype>
@@ -6,7 +6,7 @@
 
 #include "bakkesmod/wrappers/canvaswrapper.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
-#include "bakkesmod/wrappers/GameObject/ServerWrapper.h"
+#include "bakkesmod/wrappers/GameEvent/ServerWrapper.h"
 
 #include "imgui.h"
 
