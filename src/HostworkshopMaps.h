@@ -1,23 +1,18 @@
 #pragma once
-
 #include <string>
 #include <vector>
 #include <filesystem>
-
 #include "bakkesmod/plugin/bakkesmodplugin.h"
 #include "bakkesmod/plugin/pluginwindow.h"
-
-class WorkshopMapLoader : public BakkesMod::Plugin::BakkesModPlugin,
-                          public BakkesMod::Plugin::PluginWindow
+class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
+                         public BakkesMod::Plugin::PluginWindow
 {
 public:
     // BakkesModPlugin overrides
     virtual void onLoad() override;
     virtual void onUnload() override;
-
     // PluginWindow override - only called if RegisterDrawable is enabled
     virtual void Render() override;
-
     // Plugin metadata
     virtual std::string GetMenuName() override;
     virtual std::string GetMenuTitle() override;
@@ -25,24 +20,19 @@ public:
     virtual bool IsActiveOverlay() override;
     virtual void OnOpen() override;
     virtual void OnClose() override;
-
 private:
     // Map scanning
     void safeScanMaps();
     std::string getDefaultMapsPath();
-
     // Map loading
     void loadMapByIndex(int index);
     void loadMapByPath(const std::string& path);
     void loadSelectedMap();
-
     // LAN teleport
     bool isLanHost();
-
     // UI helpers
     void renderMapList();
     void renderSettings();
-
     // Data
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
