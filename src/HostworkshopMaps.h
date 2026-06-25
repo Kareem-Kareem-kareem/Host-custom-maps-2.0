@@ -5,9 +5,7 @@
 #include <windows.h>
 #include "bakkesmod/plugin/bakkesmodplugin.h"
 #include "bakkesmod/plugin/pluginwindow.h"
-
-// FEATURE SET 1: We will add ImGui UI and Map Loading functionality.
-// This is the first step of adding features "2 by 2" to ensure stability.
+#include <imgui.h>
 
 class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin, public BakkesMod::Plugin::PluginWindow {
 public:
@@ -25,19 +23,19 @@ public:
     virtual void OnClose() override;
 
 private:
-    // Base Feature: CVars and notifiers
     void registerCommands();
-
-    // Base Feature: Directory scanning (basic)
     void scanMapsDirectory();
     std::string getDefaultPath();
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
 
-    // Feature 1: Map Loading
     void loadMap(const std::string& path);
-    
-    // Feature 2: Basic ImGui State
+    std::string cleanMapName(const std::string& filename);
+
     bool isWindowOpen = false;
     int selectedMapIndex = -1;
+
+    // Feature 5 & 6: Multiplayer Hooks
+    void onJoinParty();
+    void sendMapToParty(const std::string& mapName);
 };
