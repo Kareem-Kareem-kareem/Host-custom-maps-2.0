@@ -21,6 +21,13 @@ public:
     virtual void OnClose() override;
 
 private:
+    // Feature 1+2: CVars and notifiers
+    void registerCommands();
+    
+    // Feature 3+4: Directory scanning (basic)
+    void scanMapsDirectory();
+    std::string getDefaultPath();
+
     std::vector<std::string> mapFiles;
     std::vector<std::string> mapNames;
 };
