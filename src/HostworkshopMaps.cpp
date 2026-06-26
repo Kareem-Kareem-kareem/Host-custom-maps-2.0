@@ -47,79 +47,42 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
     FindClose(h);
 }
 
-void HostWorkshopMaps::ScanMaps() {
-    mapList_.clear();
-
-    std::string rlBase = "C:\\Program Files\\Epic Games\\rocketleague\\TAGame\\CookedPCConsole";
-    std::string fullDir = rlBase + "\\" + subFolder_;
-
-    DWORD attr = GetFileAttributesA(fullDir.c_str());
-    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Folder not found: " + fullDir);
-        return;
-    }
-
-    SafeWalkDir(fullDir, mapList_);
-    std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
-        return a.displayName < b.displayName;
-    });
-
-    SetStatus(std::to_string(mapList_.size()) + " maps found in '" + subFolder_ + "'");
-}
-
-void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
-    if (index < 0 || index >= (int)mapList_.size()) {
-        SetStatus("Invalid map number");
-        return;
-    }
-
-    const auto& m = mapList_[index];
-
-    if (isLAN && gameWrapper->IsInGame()) {
-        ServerWrapper server = gameWrapper->GetCurrentGameState();
-        if (!server.IsNull() && server.HasAuthority()) {
-            SetStatus("LAN teleport: " + m.displayName);
-            gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
-            return;
-        }
-    }
-
-    SetStatus("Loading solo: " + m.displayName);
-    cvarManager->executeCommand("load_workshop \"" + m.fullPath + "\"", false);
-}
-
 void HostWorkshopMaps::onLoad() {
-    // Main commands
-    cvarManager->registerCvar("hwm_subfolder", "mods", "Subfolder name (mods, maps, Mods...)", true, true, 0, true, 0, true)
-        .addOnValueChanged([this](std::string, CVarWrapper cvar) {
-            subFolder_ = cvar.getStringValue();
-            ScanMaps();
-        });
+    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Full path to your maps folder", true, true, 0, true, 0, true);
+    dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar){
+        mapsDirectory_ = cvar.getStringValue();
+        if (!mapsDirectory_.empty()) ScanMaps();
+    });
 
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
         if (params.empty()) {
-            cvarManager->log("Usage: hwm_load <number>   (example: hwm_load 0)");
+            cvarManager->log("Usage: hwm_load <number>");
             return;
         }
-        int idx = std::stoi(params[0]);
-        LoadMap(idx, false);
-    }, "Load map solo", PERMISSION_ALL);
+        LoadMap(std::stoi(params[0]), false);
+    }, "Load map (Solo)", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_lan", [this](std::vector<std::string> params){
         if (params.empty()) {
             cvarManager->log("Usage: hwm_lan <number>");
             return;
         }
-        int idx = std::stoi(params[0]);
-        LoadMap(idx, true);
-    }, "Host LAN map change", PERMISSION_ALL);
+        LoadMap(std::stoi(params[0]), true);
+    }, "Load map (LAN)", PERMISSION_ALL);
 
-    ScanMaps(); // initial scan with "mods"
-
-    cvarManager->log("HostWorkshopMaps loaded (default = mods folder)");
-    cvarManager->log("Commands: hwm_subfolder, hwm_scan, hwm_load <num>, hwm_lan <num>");
+    cvarManager->log("HostWorkshopMaps loaded. Set path with: hwm_maps_directory \"D:/RLMAPS\"");
 }
 
 void HostWorkshopMaps::onUnload() {}
+
+void HostWorkshopMaps::ScanMaps() {
+    mapList_.clear();
+    if (mapsDirectory_.empty()) {
+        SetStatus("No directory set. Use: hwm_maps_directory \"full/path\"");
+        return;
+    }
+
+    DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES ||
