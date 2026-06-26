@@ -29,7 +29,6 @@ private:
     void ScanMaps();
     void LoadMapPath(const std::string& path);
     void TeleportLANPlayers(const std::string& path);
-    void OnTick(std::string eventName);
     void SetStatus(const std::string& msg);
 
     static std::string SanitizePath(const std::string& raw);
