@@ -60,7 +60,10 @@ void HostWorkshopMaps::onLoad() {
     auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Path to custom maps folder", true, true, 0, true, 0, true);
     dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
 
-    // Auto-scan if a path is already set in config
+    // Only one extra command
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan / Refresh map list", PERMISSION_ALL);
+
+    // Auto scan if path already set
     if (!dirCvar.getStringValue().empty()) {
         mapsDirectory_ = SanitizePath(dirCvar.getStringValue());
         ScanMaps();
