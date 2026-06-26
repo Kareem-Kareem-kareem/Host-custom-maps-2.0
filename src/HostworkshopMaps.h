@@ -7,24 +7,25 @@
 struct MapEntry {
     std::string displayName;
     std::string fullPath;
-    std::string extension;
 };
 
 class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin
 {
 public:
-    void onLoad()   override;
+    void onLoad() override;
     void onUnload() override;
-
-    void LoadMapPath(const std::string& path);
+    void Render();
 
 private:
-    void SetStatus(const std::string& msg);
-    std::string AutoDetectMapsPath();
+    void ScanMaps();
+    void LoadMap(const std::string& path, bool isLAN);
 
-    static std::string SanitizePath(const std::string& raw);
+    void SetStatus(const std::string& msg);
+
     static std::string MapNameFromPath(const std::string& path);
 
     std::vector<MapEntry> mapList_;
-    std::string mapsDirectory_;
+    std::string subFolder_ = "Mods";   // default
+    std::string statusMsg_;
+    bool showWindow_ = true;
 };
