@@ -18,6 +18,11 @@ void HostWorkshopMaps::SetStatus(const std::string& msg) {
     cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
+std::string HostWorkshopMaps::AutoDetectMapsPath() {
+    // We only use subFolder now
+    return "";
+}
+
 static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
@@ -27,7 +32,7 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
 
         std::string full = dir + "\\" + fd.cFileName;
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue; // no recursion for safety
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
 
         std::string name = fd.cFileName;
         size_t dot = name.find_last_of('.');
@@ -50,8 +55,8 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
 
-    std::string rlPath = "C:\\Program Files\\Epic Games\\rocketleague\\TAGame\\CookedPCConsole"; // change if needed
-    std::string fullDir = rlPath + "\\" + subFolder_;
+    std::string rlBase = "C:\\Program Files\\Epic Games\\rocketleague\\TAGame\\CookedPCConsole";
+    std::string fullDir = rlBase + "\\" + subFolder_;
 
     DWORD attr = GetFileAttributesA(fullDir.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -64,7 +69,7 @@ void HostWorkshopMaps::ScanMaps() {
         return a.displayName < b.displayName;
     });
 
-    SetStatus(std::to_string(mapList_.size()) + " maps found in " + subFolder_);
+    SetStatus(std::to_string(mapList_.size()) + " maps found");
 }
 
 void HostWorkshopMaps::LoadMap(const std::string& path, bool isLAN) {
@@ -73,18 +78,18 @@ void HostWorkshopMaps::LoadMap(const std::string& path, bool isLAN) {
     if (isLAN && gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            SetStatus("Hosting LAN map change...");
+            SetStatus("LAN Map Change → " + MapNameFromPath(path));
             gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
             return;
         }
     }
 
-    SetStatus("Loading solo: " + MapNameFromPath(path));
+    SetStatus("Loading Solo: " + MapNameFromPath(path));
     cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
 }
 
 void HostWorkshopMaps::onLoad() {
-    gameWrapper->RegisterDrawable([this](CanvasWrapper canvas) {
+    gameWrapper->RegisterDrawable([this](CanvasWrapper) {
         if (showWindow_) Render();
     });
 
@@ -92,32 +97,33 @@ void HostWorkshopMaps::onLoad() {
         showWindow_ = !showWindow_;
     }, "Toggle UI", PERMISSION_ALL);
 
-    ScanMaps(); // initial scan
+    ScanMaps(); // initial scan with default "Mods"
 
-    cvarManager->log("HostWorkshopMaps loaded - Press F2 or type hwm_toggle");
+    cvarManager->log("HostWorkshopMaps loaded successfully (default = Mods folder)");
 }
 
 void HostWorkshopMaps::onUnload() {}
 
 void HostWorkshopMaps::Render() {
-    ImGui::SetNextWindowSize(ImVec2(600, 500), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(650, 550), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Host Workshop Maps", &showWindow_)) {
         ImGui::End();
         return;
     }
 
-    ImGui::Text("Maps Subfolder (e.g. Mods, maps, Map):");
-    if (ImGui::InputText("##subfolder", &subFolder_, ImGuiInputTextFlags_EnterReturnsTrue)) {
+    ImGui::Text("Subfolder name (Mods / maps / Map / etc):");
+    if (ImGui::InputText("##sub", &subFolder_, ImGuiInputTextFlags_EnterReturnsTrue)) {
         ScanMaps();
     }
-    if (ImGui::Button("Scan")) ScanMaps();
     ImGui::SameLine();
-    ImGui::Text("%s", statusMsg_.c_str());
+    if (ImGui::Button("Scan")) ScanMaps();
+
+    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%s", statusMsg_.c_str());
 
     ImGui::Separator();
-    ImGui::Text("Found Maps (%d)", (int)mapList_.size());
+    ImGui::Text("Maps (%d)", (int)mapList_.size());
 
-    if (ImGui::BeginChild("MapList", ImVec2(0, 300), true)) {
+    if (ImGui::BeginChild("maps", ImVec2(0, 320), true)) {
         for (const auto& m : mapList_) {
             if (ImGui::Selectable(m.displayName.c_str())) {
                 LoadMap(m.fullPath, false);
@@ -126,11 +132,11 @@ void HostWorkshopMaps::Render() {
     }
     ImGui::EndChild();
 
-    if (ImGui::Button("Host Solo", ImVec2(200, 40))) {
-        if (!mapList_.empty()) LoadMap(mapList_[0].fullPath, false); // load first for demo
+    if (ImGui::Button("Host Solo", ImVec2(300, 50))) {
+        if (!mapList_.empty()) LoadMap(mapList_[0].fullPath, false);
     }
     ImGui::SameLine();
-    if (ImGui::Button("Host LAN", ImVec2(200, 40))) {
+    if (ImGui::Button("Host LAN", ImVec2(300, 50))) {
         if (!mapList_.empty()) LoadMap(mapList_[0].fullPath, true);
     }
 
