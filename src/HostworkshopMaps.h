@@ -20,8 +20,8 @@ public:
     void LoadMapPath(const std::string& path);
 
 private:
-    void OnCvarChanged(const std::string& cvarName, CVarWrapper cvar);
     void SetStatus(const std::string& msg);
+    std::string AutoDetectMapsPath();
 
     static std::string SanitizePath(const std::string& raw);
     static std::string MapNameFromPath(const std::string& path);
