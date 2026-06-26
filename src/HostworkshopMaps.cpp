@@ -38,20 +38,21 @@ std::string HostWorkshopMaps::AutoDetectMapsPath() {
             return p;
         }
     }
-    return "C:\\RLMAPS"; // fallback
+    return "C:\\RLMAPS";
 }
 
 void HostWorkshopMaps::onLoad() {
     mapsDirectory_ = AutoDetectMapsPath();
     SetStatus("Using maps path: " + mapsDirectory_);
 
+    // Main command
     cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params) {
         if (!params.empty()) {
             LoadMapPath(params[0]);
         } else {
-            cvarManager->log("Usage: hwm_load \"D:/path/to/your/map.udk\"");
+            cvarManager->log("Usage: hwm_load \"D:/RLMAPS/MapName.udk\"");
         }
-    }, "Load a workshop map", PERMISSION_ALL);
+    }, "Load custom workshop map", PERMISSION_ALL);
 
     cvarManager->log("HostWorkshopMaps loaded successfully");
 }
@@ -65,5 +66,6 @@ void HostWorkshopMaps::LoadMapPath(const std::string& path) {
     }
 
     SetStatus("Loading: " + MapNameFromPath(path));
-    cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
+    // Correct command
+    cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
 }
