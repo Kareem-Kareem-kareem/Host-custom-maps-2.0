@@ -57,27 +57,35 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    mapsDirectory_ = SanitizePath(mapsDirectory_);  // "C:/RLMAPS"
+    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Path to custom maps folder", true, true, 0, true, 0, true);
+    dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
 
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
-    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>){
-        for (const auto& m : mapList_) cvarManager->log(m.displayName + " -> " + m.fullPath);
-    }, "List maps", PERMISSION_ALL);
+    // Auto-scan if a path is already set in config
+    if (!dirCvar.getStringValue().empty()) {
+        mapsDirectory_ = SanitizePath(dirCvar.getStringValue());
+        ScanMaps();
+    }
 
-    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
-        if (!params.empty()) LoadMapPath(params[0]);
-        else cvarManager->log("Usage: hwm_load \"full/path/to/map.udk\"");
-    }, "Load map", PERMISSION_ALL);
-
-    ScanMaps();  // Auto scan on load
-
-    cvarManager->log("HostWorkshopMaps loaded - using hardcoded path: " + mapsDirectory_);
+    cvarManager->log("HostWorkshopMaps loaded successfully");
 }
 
 void HostWorkshopMaps::onUnload() {}
 
+void HostWorkshopMaps::OnCvarChanged(const std::string& cvarName, CVarWrapper cvar) {
+    if (cvarName == "hwm_maps_directory") {
+        mapsDirectory_ = SanitizePath(cvar.getStringValue());
+        if (!mapsDirectory_.empty()) {
+            ScanMaps();
+        }
+    }
+}
+
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
+    if (mapsDirectory_.empty()) {
+        SetStatus("No directory set");
+        return;
+    }
 
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -94,11 +102,7 @@ void HostWorkshopMaps::ScanMaps() {
 }
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path) {
-    if (path.empty()) { SetStatus("No map selected"); return; }
-    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        SetStatus("File not found: " + path); return;
-    }
-
+    if (path.empty()) return;
     SetStatus("Loading: " + MapNameFromPath(path));
     cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
 }
