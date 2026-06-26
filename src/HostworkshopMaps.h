@@ -20,20 +20,10 @@ public:
     void LoadMapPath(const std::string& path);
 
 private:
-    void OnTick();
-    void OnCvarChanged(const std::string& cvarName, CVarWrapper cvar);
-    void TeleportLANPlayers(const std::string& path);
     void SetStatus(const std::string& msg);
-
     static std::string SanitizePath(const std::string& raw);
     static std::string MapNameFromPath(const std::string& path);
 
     std::vector<MapEntry> mapList_;
-    int selectedIndex_ = 0;
-    std::string statusMsg_;
-    std::string mapsDirectory_;
-
-    bool pendingLANTransport_ = false;
-    std::string pendingMapPath_;
-    int transportCountdown_ = 0;
+    std::string mapsDirectory_ = "C:\";   // ← Change this if needed
 };
