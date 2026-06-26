@@ -51,27 +51,26 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Full path to maps folder", true, true, 0, true, 0, true);
-    dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar) {
+    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Full path to your maps folder", true, true, 0, true, 0, true);
+    dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar){
         mapsDirectory_ = cvar.getStringValue();
         if (!mapsDirectory_.empty()) ScanMaps();
     });
 
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Refresh map list", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
     cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>){
-        cvarManager->log("--- Available Maps ---");
+        cvarManager->log("--- Maps List ---");
         for (size_t i = 0; i < mapList_.size(); ++i) {
             cvarManager->log(std::to_string(i) + ": " + mapList_[i].displayName);
         }
-    }, "List maps with numbers", PERMISSION_ALL);
+    }, "List maps", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
         if (params.empty()) {
             cvarManager->log("Usage: hwm_load <number>");
             return;
         }
-        int idx = std::stoi(params[0]);
-        LoadMap(idx, false);
+        LoadMap(std::stoi(params[0]), false);
     }, "Load Solo", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_lan", [this](std::vector<std::string> params){
@@ -79,11 +78,11 @@ void HostWorkshopMaps::onLoad() {
             cvarManager->log("Usage: hwm_lan <number>");
             return;
         }
-        int idx = std::stoi(params[0]);
-        LoadMap(idx, true);
+        LoadMap(std::stoi(params[0]), true);
     }, "Host LAN", PERMISSION_ALL);
 
-    cvarManager->log("HostWorkshopMaps loaded. Use hwm_maps_directory first.");
+    cvarManager->log("HostWorkshopMaps loaded.");
+    cvarManager->log("Commands: hwm_maps_directory \"path\" → hwm_scan → hwm_list → hwm_load 0");
 }
 
 void HostWorkshopMaps::onUnload() {}
@@ -111,25 +110,30 @@ void HostWorkshopMaps::ScanMaps() {
 
 void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
     if (index < 0 || index >= (int)mapList_.size()) {
-        SetStatus("Invalid map number! Use hwm_list first");
+        SetStatus("Invalid number. Use hwm_list first");
         return;
     }
 
     const auto& m = mapList_[index];
 
-    if (isLAN) {
-        if (gameWrapper->IsInGame()) {
-            ServerWrapper server = gameWrapper->GetCurrentGameState();
-            if (!server.IsNull() && server.HasAuthority()) {
-                SetStatus("LAN teleport: " + m.displayName);
-                gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
+    try {
+        if (isLAN) {
+            if (!gameWrapper->IsInGame()) {
+                SetStatus("Not in a game");
                 return;
             }
+            ServerWrapper server = gameWrapper->GetCurrentGameState();
+            if (server.IsNull() || !server.HasAuthority()) {
+                SetStatus("Not host or not in LAN");
+                return;
+            }
+            SetStatus("LAN teleport: " + m.displayName);
+            gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
+        } else {
+            SetStatus("Loading solo: " + m.displayName);
+            cvarManager->executeCommand("load_workshop \"" + m.fullPath + "\"", false);
         }
-        SetStatus("Not in a LAN game with host rights");
-        return;
+    } catch (...) {
+        SetStatus("Error while loading map");
     }
-
-    SetStatus("Loading solo: " + m.displayName);
-    cvarManager->executeCommand("load_workshop \"" + m.fullPath + "\"", false);
 }
