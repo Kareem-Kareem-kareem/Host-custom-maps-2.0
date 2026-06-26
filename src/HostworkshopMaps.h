@@ -24,6 +24,6 @@ private:
     static std::string MapNameFromPath(const std::string& path);
 
     std::vector<MapEntry> mapList_;
-    std::string mapsDirectory_;
+    std::string mapsDirectory_ = "C:\\";   // default as requested
     std::string statusMsg_;
 };
