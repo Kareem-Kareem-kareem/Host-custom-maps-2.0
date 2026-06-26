@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cctype>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.9", PLUGINTYPE_THREADED)
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.9", 0)
 
 std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
 {
