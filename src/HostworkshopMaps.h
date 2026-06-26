@@ -20,7 +20,7 @@ public:
     void LoadMapPath(const std::string& path);
 
 private:
-    void OnTick(std::string eventName);
+    void OnTick();
     void OnCvarChanged(const std::string& cvarName, CVarWrapper cvar);
     void TeleportLANPlayers(const std::string& path);
     void SetStatus(const std::string& msg);
