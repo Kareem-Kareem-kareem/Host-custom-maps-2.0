@@ -117,4 +117,19 @@ void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
 
     const auto& m = mapList_[index];
 
-    if
+    if (isLAN) {
+        if (gameWrapper->IsInGame()) {
+            ServerWrapper server = gameWrapper->GetCurrentGameState();
+            if (!server.IsNull() && server.HasAuthority()) {
+                SetStatus("LAN teleport: " + m.displayName);
+                gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
+                return;
+            }
+        }
+        SetStatus("Not in a LAN game with host rights");
+        return;
+    }
+
+    SetStatus("Loading solo: " + m.displayName);
+    cvarManager->executeCommand("load_workshop \"" + m.fullPath + "\"", false);
+}
