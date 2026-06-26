@@ -21,7 +21,6 @@ std::string HostWorkshopMaps::MapNameFromPath(const std::string& path) {
 }
 
 void HostWorkshopMaps::SetStatus(const std::string& msg) {
-    statusMsg_ = msg;
     cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
@@ -58,61 +57,48 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Maps folder", true, true, 0, true, 0, true);
-    dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
-
-    cvarManager->registerCvar("hwm_auto_scan", "1", "Auto scan", true, true, 0, true, 1);
+    mapsDirectory_ = SanitizePath(mapsDirectory_);  // "C:/RLMAPS"
 
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
     cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>){
         for (const auto& m : mapList_) cvarManager->log(m.displayName + " -> " + m.fullPath);
     }, "List maps", PERMISSION_ALL);
 
-    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> p){
-        if (!p.empty()) LoadMapPath(p[0]);
+    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
+        if (!params.empty()) LoadMapPath(params[0]);
+        else cvarManager->log("Usage: hwm_load \"full/path/to/map.udk\"");
     }, "Load map", PERMISSION_ALL);
 
-    cvarManager->log("HostWorkshopMaps loaded successfully");
+    ScanMaps();  // Auto scan on load
+
+    cvarManager->log("HostWorkshopMaps loaded - using hardcoded path: " + mapsDirectory_);
 }
 
 void HostWorkshopMaps::onUnload() {}
 
-void HostWorkshopMaps::OnCvarChanged(const std::string& cvarName, CVarWrapper cvar) {
-    if (cvarName == "hwm_maps_directory") {
-        mapsDirectory_ = SanitizePath(cvar.getStringValue());
-        if (!mapsDirectory_.empty()) ScanMaps();
-    }
-}
-
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
-    if (mapsDirectory_.empty()) {
-        SetStatus("No directory set");
-        return;
-    }
+
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Directory not found");
+        SetStatus("Directory not found: " + mapsDirectory_);
         return;
     }
 
     WalkDir(mapsDirectory_, mapList_);
-    std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){ return a.displayName < b.displayName; });
+    std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
+        return a.displayName < b.displayName;
+    });
 
     SetStatus(std::to_string(mapList_.size()) + " maps found");
 }
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path) {
-    if (path.empty()) { SetStatus("No map"); return; }
+    if (path.empty()) { SetStatus("No map selected"); return; }
     if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        SetStatus("File not found"); return;
+        SetStatus("File not found: " + path); return;
     }
 
     SetStatus("Loading: " + MapNameFromPath(path));
     cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
-}
-
-void HostWorkshopMaps::TeleportLANPlayers(const std::string& path) {
-    // Disabled for now to prevent crashes
-    SetStatus("LAN teleport not implemented in minimal version");
 }
