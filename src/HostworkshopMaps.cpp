@@ -18,10 +18,6 @@ void HostWorkshopMaps::SetStatus(const std::string& msg) {
     cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
-std::string HostWorkshopMaps::AutoDetectMapsPath() {
-    return "";
-}
-
 static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
     WIN32_FIND_DATAA fd;
     HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
@@ -59,7 +55,7 @@ void HostWorkshopMaps::ScanMaps() {
 
     DWORD attr = GetFileAttributesA(fullDir.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Folder not found: " + fullDir + " (change subfolder and press Scan)");
+        SetStatus("Folder not found: " + fullDir);
         return;
     }
 
@@ -68,77 +64,62 @@ void HostWorkshopMaps::ScanMaps() {
         return a.displayName < b.displayName;
     });
 
-    SetStatus(std::to_string(mapList_.size()) + " maps found in " + subFolder_);
+    SetStatus(std::to_string(mapList_.size()) + " maps found in '" + subFolder_ + "'");
 }
 
-void HostWorkshopMaps::LoadMap(const std::string& path, bool isLAN) {
-    if (path.empty()) return;
+void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
+    if (index < 0 || index >= (int)mapList_.size()) {
+        SetStatus("Invalid map number");
+        return;
+    }
+
+    const auto& m = mapList_[index];
 
     if (isLAN && gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            SetStatus("LAN: Changing map to " + MapNameFromPath(path));
-            gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
+            SetStatus("LAN teleport: " + m.displayName);
+            gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
             return;
         }
     }
 
-    SetStatus("Loading Solo: " + MapNameFromPath(path));
-    cvarManager->executeCommand("load_workshop \"" + path + "\"", false);
+    SetStatus("Loading solo: " + m.displayName);
+    cvarManager->executeCommand("load_workshop \"" + m.fullPath + "\"", false);
 }
 
 void HostWorkshopMaps::onLoad() {
-    gameWrapper->RegisterDrawable([this](CanvasWrapper canvas) {
-        Render(canvas);
-    });
+    // Main commands
+    cvarManager->registerCvar("hwm_subfolder", "mods", "Subfolder name (mods, maps, Mods...)", true, true, 0, true, 0, true)
+        .addOnValueChanged([this](std::string, CVarWrapper cvar) {
+            subFolder_ = cvar.getStringValue();
+            ScanMaps();
+        });
 
-    cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>){
-        showWindow_ = !showWindow_;
-    }, "Toggle UI", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
 
-    ScanMaps(); // initial scan with "Mods"
+    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
+        if (params.empty()) {
+            cvarManager->log("Usage: hwm_load <number>   (example: hwm_load 0)");
+            return;
+        }
+        int idx = std::stoi(params[0]);
+        LoadMap(idx, false);
+    }, "Load map solo", PERMISSION_ALL);
 
-    cvarManager->log("HostWorkshopMaps loaded (default = Mods folder). Type hwm_toggle");
+    cvarManager->registerNotifier("hwm_lan", [this](std::vector<std::string> params){
+        if (params.empty()) {
+            cvarManager->log("Usage: hwm_lan <number>");
+            return;
+        }
+        int idx = std::stoi(params[0]);
+        LoadMap(idx, true);
+    }, "Host LAN map change", PERMISSION_ALL);
+
+    ScanMaps(); // initial scan with "mods"
+
+    cvarManager->log("HostWorkshopMaps loaded (default = mods folder)");
+    cvarManager->log("Commands: hwm_subfolder, hwm_scan, hwm_load <num>, hwm_lan <num>");
 }
 
 void HostWorkshopMaps::onUnload() {}
-
-void HostWorkshopMaps::Render(CanvasWrapper) {
-    if (!showWindow_) return;
-
-    ImGui::SetNextWindowSize(ImVec2(650, 550), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Host Workshop Maps", &showWindow_)) {
-        ImGui::End();
-        return;
-    }
-
-    ImGui::Text("Subfolder (Mods / maps / Map / etc):");
-    if (ImGui::InputText("##subfolder", &subFolder_, ImGuiInputTextFlags_EnterReturnsTrue)) {
-        ScanMaps();
-    }
-    if (ImGui::Button("Scan Folder")) ScanMaps();
-
-    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "%s", statusMsg_.c_str());
-
-    ImGui::Separator();
-    ImGui::Text("Maps (%d)", (int)mapList_.size());
-
-    if (ImGui::BeginChild("MapList", ImVec2(0, 300), true)) {
-        for (const auto& m : mapList_) {
-            if (ImGui::Selectable(m.displayName.c_str())) {
-                LoadMap(m.fullPath, false);
-            }
-        }
-    }
-    ImGui::EndChild();
-
-    if (ImGui::Button("Host Solo", ImVec2(300, 50))) {
-        if (!mapList_.empty()) LoadMap(mapList_[0].fullPath, false);
-    }
-    ImGui::SameLine();
-    if (ImGui::Button("Host LAN", ImVec2(300, 50))) {
-        if (!mapList_.empty()) LoadMap(mapList_[0].fullPath, true);
-    }
-
-    ImGui::End();
-}
