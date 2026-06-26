@@ -76,4 +76,45 @@ void HostWorkshopMaps::onLoad() {
 
     cvarManager->registerNotifier("hwm_lan", [this](std::vector<std::string> params){
         if (params.empty()) {
-            c
+            cvarManager->log("Usage: hwm_lan <number>");
+            return;
+        }
+        int idx = std::stoi(params[0]);
+        LoadMap(idx, true);
+    }, "Host LAN", PERMISSION_ALL);
+
+    cvarManager->log("HostWorkshopMaps loaded. Use hwm_maps_directory first.");
+}
+
+void HostWorkshopMaps::onUnload() {}
+
+void HostWorkshopMaps::ScanMaps() {
+    mapList_.clear();
+    if (mapsDirectory_.empty()) {
+        SetStatus("Set hwm_maps_directory first");
+        return;
+    }
+
+    DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        SetStatus("Directory not found");
+        return;
+    }
+
+    SafeWalkDir(mapsDirectory_, mapList_);
+    std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
+        return a.displayName < b.displayName;
+    });
+
+    SetStatus(std::to_string(mapList_.size()) + " maps found");
+}
+
+void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
+    if (index < 0 || index >= (int)mapList_.size()) {
+        SetStatus("Invalid map number! Use hwm_list first");
+        return;
+    }
+
+    const auto& m = mapList_[index];
+
+    if
