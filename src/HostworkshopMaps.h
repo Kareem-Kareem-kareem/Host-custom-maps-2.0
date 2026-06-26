@@ -21,6 +21,7 @@ private:
     void LoadMap(const std::string& path, bool isLAN);
 
     void SetStatus(const std::string& msg);
+    std::string AutoDetectMapsPath();
 
     static std::string MapNameFromPath(const std::string& path);
 
