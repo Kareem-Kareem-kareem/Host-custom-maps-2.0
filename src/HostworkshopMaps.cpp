@@ -85,4 +85,36 @@ void HostWorkshopMaps::ScanMaps() {
     }
 
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
-    if (attr == INVALID_FILE_ATTRIBUTES ||
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
+        SetStatus("Directory not found: " + mapsDirectory_);
+        return;
+    }
+
+    SafeWalkDir(mapsDirectory_, mapList_);
+    std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
+        return a.displayName < b.displayName;
+    });
+
+    SetStatus(std::to_string(mapList_.size()) + " maps found");
+}
+
+void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
+    if (index < 0 || index >= (int)mapList_.size()) {
+        SetStatus("Invalid map number");
+        return;
+    }
+
+    const auto& m = mapList_[index];
+
+    if (isLAN && gameWrapper->IsInGame()) {
+        ServerWrapper server = gameWrapper->GetCurrentGameState();
+        if (!server.IsNull() && server.HasAuthority()) {
+            SetStatus("LAN: Changing to " + m.displayName);
+            gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
+            return;
+        }
+    }
+
+    SetStatus("Loading: " + m.displayName);
+    cvarManager->executeCommand("load_workshop \"" + m.fullPath + "\"", false);
+}
