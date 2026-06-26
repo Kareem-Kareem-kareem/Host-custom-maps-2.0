@@ -18,7 +18,6 @@ public:
 
     void ScanMaps();
     void LoadMapPath(const std::string& path);
-    void TeleportLANPlayers(const std::string& path);
 
 private:
     void OnTick(std::string eventName);
