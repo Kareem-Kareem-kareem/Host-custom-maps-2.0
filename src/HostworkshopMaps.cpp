@@ -59,29 +59,29 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    // CVar for maps directory
     auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Path to your custom maps folder", true, true, 0, true, 0, true);
     dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
 
     cvarManager->registerCvar("hwm_auto_scan", "1", "Auto scan on directory change", true, true, 0, true, 1);
 
-    // Commands
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan / Refresh map list", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
     cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>){
         for (const auto& m : mapList_) cvarManager->log(m.displayName + " -> " + m.fullPath);
-    }, "List maps in console", PERMISSION_ALL);
+    }, "List maps", PERMISSION_ALL);
 
-    // Safe timer-based tick (replaces broken GameViewportClient_TA.Tick hook)
-    gameWrapper->SetTimeout([this](GameWrapper* gw) {
-        this->OnTick();
-    }, 0.016f);
+    // Register LoadMapPath for GUI / .set file
+    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
+        if (!params.empty()) LoadMapPath(params[0]);
+        else cvarManager->log("Usage: hwm_load \"full/path/to/map.udk\"");
+    }, "Load a specific map", PERMISSION_ALL);
+
+    // Single timer (not recursive every frame)
+    gameWrapper->SetTimeout([this](GameWrapper*) { OnTick(); }, 0.1f);
 
     cvarManager->log("HostWorkshopMaps loaded successfully");
 }
 
-void HostWorkshopMaps::onUnload() {
-    // No need to unhook timer
-}
+void HostWorkshopMaps::onUnload() {}
 
 void HostWorkshopMaps::OnCvarChanged(const std::string& cvarName, CVarWrapper cvar) {
     if (cvarName == "hwm_maps_directory") {
@@ -94,8 +94,6 @@ void HostWorkshopMaps::OnCvarChanged(const std::string& cvarName, CVarWrapper cv
 
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
-    selectedIndex_ = 0;
-
     if (mapsDirectory_.empty()) {
         SetStatus("No directory set");
         return;
@@ -103,72 +101,66 @@ void HostWorkshopMaps::ScanMaps() {
 
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Directory not found: " + mapsDirectory_);
+        SetStatus("Directory not found");
         return;
     }
 
     WalkDir(mapsDirectory_, mapList_);
-    std::sort(mapList_.begin(), mapList_.end(),
-        [](const MapEntry& a, const MapEntry& b){ return a.displayName < b.displayName; });
+    std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
+        return a.displayName < b.displayName;
+    });
 
     SetStatus(std::to_string(mapList_.size()) + " maps found");
 }
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path) {
-    if (path.empty()) {
-        SetStatus("No map selected");
-        return;
-    }
+    if (path.empty()) { SetStatus("No map selected"); return; }
     if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        SetStatus("File not found: " + path);
-        return;
+        SetStatus("File not found: " + path); return;
     }
 
     if (gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            ArrayWrapper<PriWrapper> pris = server.GetPRIs();
             int remote = 0;
+            ArrayWrapper<PriWrapper> pris = server.GetPRIs();
             for (int i = 0; i < pris.Count(); ++i) {
                 PriWrapper pri = pris.Get(i);
                 if (!pri.IsNull() && !pri.IsLocalPlayerPRI()) remote++;
             }
             if (remote > 0) {
-                SetStatus("LAN: Preparing to teleport " + std::to_string(remote) + " player(s)...");
+                SetStatus("LAN teleport in progress...");
                 pendingMapPath_ = path;
                 pendingLANTransport_ = true;
-                transportCountdown_ = 45;  // ~0.75 seconds
+                transportCountdown_ = 30;
                 return;
             }
         }
     }
 
-    SetStatus("Loading: " + MapNameFromPath(path));
-    cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
+    SetStatus("Loading map: " + MapNameFromPath(path));
+    cvarManager->executeCommand("load_workshop_map \"" + path + "\"");
 }
 
 void HostWorkshopMaps::TeleportLANPlayers(const std::string& path) {
-    if (!gameWrapper->IsInGame()) return;
-    ServerWrapper server = gameWrapper->GetCurrentGameState();
-    if (server.IsNull() || !server.HasAuthority()) return;
-
-    SetStatus("Teleporting to: " + MapNameFromPath(path));
-    gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
+    if (gameWrapper->IsInGame()) {
+        ServerWrapper server = gameWrapper->GetCurrentGameState();
+        if (!server.IsNull() && server.HasAuthority()) {
+            SetStatus("Teleporting players to: " + MapNameFromPath(path));
+            gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
+        }
+    }
 }
 
 void HostWorkshopMaps::OnTick() {
-    if (!pendingLANTransport_) {
-        // Reschedule
-        gameWrapper->SetTimeout([this](GameWrapper* gw) { this->OnTick(); }, 0.016f);
-        return;
+    if (pendingLANTransport_) {
+        if (--transportCountdown_ <= 0) {
+            pendingLANTransport_ = false;
+            TeleportLANPlayers(pendingMapPath_);
+            pendingMapPath_.clear();
+        }
     }
 
-    if (--transportCountdown_ > 0) {
-        gameWrapper->SetTimeout([this](GameWrapper* gw) { this->OnTick(); }, 0.016f);
-        return;
-    }
-
-    pendingLANTransport_ = false;
-    TeleportLANPlayers(pendingMapPath_);
-    pendingMapPath_.clear();
+    // Reschedule once per 100ms instead of every frame
+    gameWrapper->SetTimeout([this](GameWrapper*) { OnTick(); }, 0.1f);
 }
