@@ -16,7 +16,6 @@ public:
     void onLoad()   override;
     void onUnload() override;
 
-    void ScanMaps();
     void LoadMapPath(const std::string& path);
 
 private:
