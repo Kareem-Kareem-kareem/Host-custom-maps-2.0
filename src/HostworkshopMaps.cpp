@@ -33,8 +33,9 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out) {
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
 
         std::string full = dir + "\\" + fd.cFileName;
+
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            WalkDir(full, out);
+            WalkDir(full, out);   // recursive
         } else {
             std::string name = fd.cFileName;
             size_t dot = name.find_last_of('.');
@@ -60,12 +61,16 @@ void HostWorkshopMaps::onLoad() {
     auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Path to custom maps folder", true, true, 0, true, 0, true);
     dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
 
-    // Only one extra command
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan / Refresh map list", PERMISSION_ALL);
+    // Only one command: hwm_load
+    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
+        if (!params.empty()) LoadMapPath(params[0]);
+        else cvarManager->log("Usage: hwm_load \"D:/RLMAPS/mapname.udk\"");
+    }, "Load a map", PERMISSION_ALL);
 
-    // Auto scan if path already set
-    if (!dirCvar.getStringValue().empty()) {
-        mapsDirectory_ = SanitizePath(dirCvar.getStringValue());
+    // Auto load previous path
+    std::string prev = dirCvar.getStringValue();
+    if (!prev.empty()) {
+        mapsDirectory_ = SanitizePath(prev);
         ScanMaps();
     }
 
@@ -77,9 +82,7 @@ void HostWorkshopMaps::onUnload() {}
 void HostWorkshopMaps::OnCvarChanged(const std::string& cvarName, CVarWrapper cvar) {
     if (cvarName == "hwm_maps_directory") {
         mapsDirectory_ = SanitizePath(cvar.getStringValue());
-        if (!mapsDirectory_.empty()) {
-            ScanMaps();
-        }
+        if (!mapsDirectory_.empty()) ScanMaps();
     }
 }
 
@@ -105,7 +108,11 @@ void HostWorkshopMaps::ScanMaps() {
 }
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path) {
-    if (path.empty()) return;
-    SetStatus("Loading: " + MapNameFromPath(path));
+    if (path.empty()) { SetStatus("No path given"); return; }
+    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        SetStatus("File not found: " + path); return;
+    }
+
+    SetStatus("Loading map: " + MapNameFromPath(path));
     cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
 }
