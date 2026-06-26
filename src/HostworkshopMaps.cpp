@@ -25,7 +25,7 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 
     int count = 0;
     do {
-        if (count > 300) break; // safety
+        if (count > 400) break;
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
 
         std::string full = dir + "\\" + fd.cFileName;
@@ -51,24 +51,33 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    // From your .set file
-    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Maps Directory", true, true, 0, true, 0, true);
-    dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar) {
+    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Full path to your maps folder", true, true, 0, true, 0, true);
+    dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar){
         mapsDirectory_ = cvar.getStringValue();
         if (!mapsDirectory_.empty()) ScanMaps();
     });
 
-    cvarManager->registerCvar("hwm_auto_scan", "1", "Auto-scan on open", true, true, 0, true, 1);
-
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan / Refresh", PERMISSION_ALL);
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
     cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>){
         for (size_t i = 0; i < mapList_.size(); ++i) {
-            cvarManager->log(std::to_string(i) + ": " + mapList_[i].displayName);
+            cvarManager->log(std::to_string(i) + " → " + mapList_[i].displayName);
         }
-    }, "List maps", PERMISSION_ALL);
+    }, "List all maps with numbers", PERMISSION_ALL);
 
-    cvarManager->log("HostWorkshopMaps loaded successfully");
-    cvarManager->log("Set your folder: hwm_maps_directory \"D:/RLMAPS\"");
+    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
+        if (params.empty()) { cvarManager->log("Usage: hwm_load <number>"); return; }
+        LoadMap(std::stoi(params[0]), false);
+    }, "Load map Solo", PERMISSION_ALL);
+
+    cvarManager->registerNotifier("hwm_lan", [this](std::vector<std::string> params){
+        if (params.empty()) { cvarManager->log("Usage: hwm_lan <number>"); return; }
+        LoadMap(std::stoi(params[0]), true);
+    }, "Host LAN map change", PERMISSION_ALL);
+
+    cvarManager->log("HostWorkshopMaps loaded.");
+    cvarManager->log("1. hwm_maps_directory \"D:/Your/Maps\"");
+    cvarManager->log("2. hwm_scan");
+    cvarManager->log("3. hwm_list");
 }
 
 void HostWorkshopMaps::onUnload() {}
@@ -76,7 +85,7 @@ void HostWorkshopMaps::onUnload() {}
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
     if (mapsDirectory_.empty()) {
-        SetStatus("Set hwm_maps_directory first");
+        SetStatus("Please set hwm_maps_directory first");
         return;
     }
 
@@ -91,7 +100,7 @@ void HostWorkshopMaps::ScanMaps() {
         return a.displayName < b.displayName;
     });
 
-    SetStatus(std::to_string(mapList_.size()) + " maps loaded");
+    SetStatus(std::to_string(mapList_.size()) + " maps found");
 }
 
 void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
@@ -105,7 +114,7 @@ void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
     if (isLAN && gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            SetStatus("LAN teleport: " + m.displayName);
+            SetStatus("LAN: " + m.displayName);
             gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
             return;
         }
