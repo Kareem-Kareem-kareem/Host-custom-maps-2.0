@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <cctype>
 
-BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.8", PLUGINTYPE_FREEPLAY)
+BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "1.9", PLUGINTYPE_FREEPLAY)
 
 std::string HostWorkshopMaps::SanitizePath(const std::string& raw)
 {
@@ -60,47 +60,10 @@ static void WalkDir(const std::string& dir, std::vector<MapEntry>& out)
 void HostWorkshopMaps::onLoad()
 {
     cvarManager->registerCvar("hwm_maps_directory", "", "Maps folder", true);
-
-    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>) {
-        ScanMaps();
-    }, "Scan maps directory", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_list", [this](std::vector<std::string>) {
-        for (int i = 0; i < (int)mapList_.size(); ++i)
-            cvarManager->log("[" + std::to_string(i) + "] " + mapList_[i].displayName);
-    }, "List maps in console", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> args) {
-        if (args.size() < 2) {
-            if (!mapList_.empty()) LoadMapPath(mapList_[selectedIndex_].fullPath);
-            return;
-        }
-        int idx = std::stoi(args[1]);
-        if (idx >= 0 && idx < (int)mapList_.size()) {
-            selectedIndex_ = idx;
-            LoadMapPath(mapList_[idx].fullPath);
-        }
-    }, "Load map by index", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_next", [this](std::vector<std::string>) {
-        if (mapList_.empty()) return;
-        selectedIndex_ = (selectedIndex_ + 1) % mapList_.size();
-        SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
-    }, "Select next map", PERMISSION_ALL);
-
-    cvarManager->registerNotifier("hwm_prev", [this](std::vector<std::string>) {
-        if (mapList_.empty()) return;
-        selectedIndex_ = (selectedIndex_ - 1 + mapList_.size()) % mapList_.size();
-        SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
-    }, "Select previous map", PERMISSION_ALL);
-
-
     cvarManager->log("HostWorkshopMaps: loaded");
 }
 
-void HostWorkshopMaps::onUnload()
-{
-}
+void HostWorkshopMaps::onUnload() {}
 
 void HostWorkshopMaps::ScanMaps()
 {
@@ -148,4 +111,13 @@ void HostWorkshopMaps::TeleportLANPlayers(const std::string& path)
     ServerWrapper server = gameWrapper->GetCurrentGameState();
     if (server.IsNull() || !server.HasAuthority()) return;
     gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
+}
+
+void HostWorkshopMaps::OnTick(std::string)
+{
+    if (!pendingLANTransport_) return;
+    if (--transportCountdown_ > 0) return;
+    pendingLANTransport_ = false;
+    TeleportLANPlayers(pendingMapPath_);
+    pendingMapPath_.clear();
 }
