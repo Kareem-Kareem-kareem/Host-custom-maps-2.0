@@ -31,46 +31,11 @@ jobs:
           Expand-Archive sdk.zip -DestinationPath sdk-raw
           Move-Item sdk-raw/BakkesModSDK-master bakkesmod-sdk
 
-      - name: Verify SDK layout
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "bakkesmod-sdk/include/bakkesmod/plugin/bakkesmodplugin.h")) {
-            Write-Error "SDK headers missing"
-            exit 1
-          }
-          Write-Host "SDK layout OK"
-
-      - name: Cache ImGui
-        id: cache-imgui
-        uses: actions/cache@v4
-        with:
-          path: third_party/imgui
-          key: imgui-v1.89.9
-
-      - name: Download ImGui
-        if: steps.cache-imgui.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/ocornut/imgui/archive/refs/tags/v1.89.9.zip" -OutFile imgui.zip
-          Expand-Archive imgui.zip -DestinationPath imgui-raw
-          New-Item -ItemType Directory -Force -Path third_party
-          Move-Item imgui-raw/imgui-1.89.9 third_party/imgui
-
-      - name: Verify ImGui layout
-        shell: pwsh
-        run: |
-          if (-not (Test-Path "third_party/imgui/imgui.h")) {
-            Write-Error "ImGui headers missing"
-            exit 1
-          }
-          Write-Host "ImGui layout OK"
-
       - name: Configure CMake
         shell: pwsh
         run: |
           cmake -B build -S . `
             -DBAKKESMOD_SDK="${{ github.workspace }}/bakkesmod-sdk" `
-            -DIMGUI_DIR="${{ github.workspace }}/third_party/imgui" `
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
@@ -82,14 +47,10 @@ jobs:
         shell: pwsh
         run: |
           $dll = Get-ChildItem -Path build -Filter "HostWorkshopMaps.dll" -Recurse | Select-Object -First 1
-          if (-not $dll) {
-            Write-Error "HostWorkshopMaps.dll was not produced by the build"
-            exit 1
-          }
-          Write-Host "Found: $($dll.FullName)"
+          if (-not $dll) { Write-Error "DLL not found"; exit 1 }
           echo "dll_path=$($dll.FullName)" >> $env:GITHUB_OUTPUT
 
-      - name: Upload artifact (dll + set file)
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: HostWorkshopMaps-release
