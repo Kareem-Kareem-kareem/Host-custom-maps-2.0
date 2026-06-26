@@ -13,10 +13,21 @@ struct MapEntry {
 class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin
 {
 public:
-    void onLoad()   override;
+    void onLoad() override;
     void onUnload() override;
 
+    void ScanMaps();
+    void LoadMapPath(const std::string& path);
+    void TeleportLANPlayers(const std::string& path);
+
 private:
+    void OnTick(std::string eventName);
+    void OnCvarChanged(const std::string& cvarName, CVarWrapper cvar);
+    void SetStatus(const std::string& msg);
+
+    static std::string SanitizePath(const std::string& raw);
+    static std::string MapNameFromPath(const std::string& path);
+
     std::vector<MapEntry> mapList_;
     int selectedIndex_ = 0;
     std::string statusMsg_;
@@ -25,13 +36,4 @@ private:
     bool pendingLANTransport_ = false;
     std::string pendingMapPath_;
     int transportCountdown_ = 0;
-
-    void ScanMaps();
-    void LoadMapPath(const std::string& path);
-    void TeleportLANPlayers(const std::string& path);
-    void OnTick(std::string eventName);
-    void SetStatus(const std::string& msg);
-
-    static std::string SanitizePath(const std::string& raw);
-    static std::string MapNameFromPath(const std::string& path);
 };
