@@ -1,5 +1,6 @@
 #pragma once
 #include "bakkesmod/plugin/bakkesmodplugin.h"
+#include "imgui/imgui.h"
 #include <string>
 #include <vector>
 #include <Windows.h>
@@ -14,7 +15,7 @@ class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin
 public:
     void onLoad() override;
     void onUnload() override;
-    void Render();
+    void Render(CanvasWrapper canvas);
 
 private:
     void ScanMaps();
@@ -26,7 +27,7 @@ private:
     static std::string MapNameFromPath(const std::string& path);
 
     std::vector<MapEntry> mapList_;
-    std::string subFolder_ = "Mods";   // default
+    std::string subFolder_ = "Mods";
     std::string statusMsg_;
     bool showWindow_ = true;
 };
