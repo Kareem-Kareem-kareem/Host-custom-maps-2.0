@@ -3,6 +3,7 @@
 #include "bakkesmod/wrappers/gameevent/serverwrapper.h"
 #include <algorithm>
 #include <cctype>
+#include <stack>
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", 0)
 
@@ -24,50 +25,56 @@ void HostWorkshopMaps::SetStatus(const std::string& msg) {
     cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
-static void WalkDir(const std::string& dir, std::vector<MapEntry>& out) {
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
+// Non-recursive WalkDir to prevent stack overflow
+static void WalkDir(const std::string& root, std::vector<MapEntry>& out) {
+    std::stack<std::string> dirs;
+    dirs.push(root);
 
-    do {
-        if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
+    while (!dirs.empty()) {
+        std::string dir = dirs.top();
+        dirs.pop();
 
-        std::string full = dir + "\\" + fd.cFileName;
+        WIN32_FIND_DATAA fd;
+        HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
+        if (h == INVALID_HANDLE_VALUE) continue;
 
-        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-            WalkDir(full, out);   // recursive
-        } else {
-            std::string name = fd.cFileName;
-            size_t dot = name.find_last_of('.');
-            if (dot == std::string::npos) continue;
+        do {
+            if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
 
-            std::string ext = name.substr(dot + 1);
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (ext == "upk" || ext == "udk") {
-                MapEntry me;
-                me.extension = ext;
-                me.fullPath = full;
-                for (char& c : me.fullPath) if (c == '\\') c = '/';
-                me.displayName = name.substr(0, dot);
-                out.push_back(me);
+            std::string full = dir + "\\" + fd.cFileName;
+
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+                dirs.push(full);  // Add subdirectory
+            } else {
+                std::string name = fd.cFileName;
+                size_t dot = name.find_last_of('.');
+                if (dot == std::string::npos) continue;
+
+                std::string ext = name.substr(dot + 1);
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (ext == "upk" || ext == "udk") {
+                    MapEntry me;
+                    me.extension = ext;
+                    me.fullPath = full;
+                    for (char& c : me.fullPath) if (c == '\\') c = '/';
+                    me.displayName = name.substr(0, dot);
+                    out.push_back(me);
+                }
             }
-        }
-    } while (FindNextFileA(h, &fd));
+        } while (FindNextFileA(h, &fd));
 
-    FindClose(h);
+        FindClose(h);
+    }
 }
 
 void HostWorkshopMaps::onLoad() {
     auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Path to custom maps folder", true, true, 0, true, 0, true);
     dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
 
-    // Only one command: hwm_load
-    cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
-        if (!params.empty()) LoadMapPath(params[0]);
-        else cvarManager->log("Usage: hwm_load \"D:/RLMAPS/mapname.udk\"");
-    }, "Load a map", PERMISSION_ALL);
+    // Only command: hwm_scan
+    cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan / Refresh map list", PERMISSION_ALL);
 
-    // Auto load previous path
+    // Auto scan if path already saved
     std::string prev = dirCvar.getStringValue();
     if (!prev.empty()) {
         mapsDirectory_ = SanitizePath(prev);
@@ -108,11 +115,7 @@ void HostWorkshopMaps::ScanMaps() {
 }
 
 void HostWorkshopMaps::LoadMapPath(const std::string& path) {
-    if (path.empty()) { SetStatus("No path given"); return; }
-    if (GetFileAttributesA(path.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        SetStatus("File not found: " + path); return;
-    }
-
-    SetStatus("Loading map: " + MapNameFromPath(path));
+    if (path.empty()) return;
+    SetStatus("Loading: " + MapNameFromPath(path));
     cvarManager->executeCommand("load_workshop_map \"" + path + "\"", false);
 }
