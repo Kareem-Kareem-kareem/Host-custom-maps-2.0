@@ -20,10 +20,12 @@ public:
     void LoadMapPath(const std::string& path);
 
 private:
+    void OnCvarChanged(const std::string& cvarName, CVarWrapper cvar);
     void SetStatus(const std::string& msg);
+
     static std::string SanitizePath(const std::string& raw);
     static std::string MapNameFromPath(const std::string& path);
 
     std::vector<MapEntry> mapList_;
-    std::string mapsDirectory_ = "C:\";   // ← Change this if needed
+    std::string mapsDirectory_;
 };
