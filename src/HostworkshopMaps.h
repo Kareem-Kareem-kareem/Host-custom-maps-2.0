@@ -1,46 +1,37 @@
 #pragma once
-
-#include <vector>
-#include <string>
-#include <functional>
-#include <windows.h>
 #include "bakkesmod/plugin/bakkesmodplugin.h"
-#include "bakkesmod/plugin/pluginwindow.h"
-#include <imgui.h>
+#include <string>
+#include <vector>
+#include <Windows.h>
 
-class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin, public BakkesMod::Plugin::PluginWindow {
+struct MapEntry {
+    std::string displayName;
+    std::string fullPath;
+    std::string extension;
+};
+
+class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin
+{
 public:
-    virtual void onLoad() override;
-    virtual void onUnload() override;
-    
-    // ImGui PluginWindow interface
-    virtual void Render() override;
-    virtual std::string GetMenuName() override;
-    virtual std::string GetMenuTitle() override;
-    virtual void SetImGuiContext(uintptr_t ctx) override;
-    virtual bool ShouldBlockInput() override;
-    virtual bool IsActiveOverlay() override;
-    virtual void OnOpen() override;
-    virtual void OnClose() override;
+    void onLoad()   override;
+    void onUnload() override;
 
 private:
-    void registerCommands();
-    void scanMapsDirectory();
-    std::string getDefaultPath();
-    std::vector<std::string> mapFiles;
-    std::vector<std::string> mapNames;
+    std::vector<MapEntry> mapList_;
+    int selectedIndex_ = 0;
+    std::string statusMsg_;
+    std::string mapsDirectory_;
 
-    void loadMap(const std::string& path);
-    std::string cleanMapName(const std::string& filename);
+    bool pendingLANTransport_ = false;
+    std::string pendingMapPath_;
+    int transportCountdown_ = 0;
 
-    bool isWindowOpen = false;
-    int selectedMapIndex = -1;
+    void ScanMaps();
+    void LoadMapPath(const std::string& path);
+    void TeleportLANPlayers(const std::string& path);
+    void OnTick(std::string eventName);
+    void SetStatus(const std::string& msg);
 
-    // Feature 5 & 6: Multiplayer Hooks
-    void onJoinParty(std::string eventName);
-    void sendMapToParty(const std::string& mapName);
-
-    // Feature 7 & 8: Search Filter & Host Listen Server
-    char searchBuffer[256] = "";
-    void hostMap(const std::string& path);
+    static std::string SanitizePath(const std::string& raw);
+    static std::string MapNameFromPath(const std::string& path);
 };
