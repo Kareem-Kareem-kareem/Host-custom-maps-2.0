@@ -19,7 +19,6 @@ void HostWorkshopMaps::SetStatus(const std::string& msg) {
 }
 
 std::string HostWorkshopMaps::AutoDetectMapsPath() {
-    // We only use subFolder now
     return "";
 }
 
@@ -60,7 +59,7 @@ void HostWorkshopMaps::ScanMaps() {
 
     DWORD attr = GetFileAttributesA(fullDir.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Folder not found: " + fullDir);
+        SetStatus("Folder not found: " + fullDir + " (change subfolder and press Scan)");
         return;
     }
 
@@ -69,7 +68,7 @@ void HostWorkshopMaps::ScanMaps() {
         return a.displayName < b.displayName;
     });
 
-    SetStatus(std::to_string(mapList_.size()) + " maps found");
+    SetStatus(std::to_string(mapList_.size()) + " maps found in " + subFolder_);
 }
 
 void HostWorkshopMaps::LoadMap(const std::string& path, bool isLAN) {
@@ -78,7 +77,7 @@ void HostWorkshopMaps::LoadMap(const std::string& path, bool isLAN) {
     if (isLAN && gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            SetStatus("LAN Map Change → " + MapNameFromPath(path));
+            SetStatus("LAN: Changing map to " + MapNameFromPath(path));
             gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
             return;
         }
@@ -89,41 +88,42 @@ void HostWorkshopMaps::LoadMap(const std::string& path, bool isLAN) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    gameWrapper->RegisterDrawable([this](CanvasWrapper) {
-        if (showWindow_) Render();
+    gameWrapper->RegisterDrawable([this](CanvasWrapper canvas) {
+        Render(canvas);
     });
 
     cvarManager->registerNotifier("hwm_toggle", [this](std::vector<std::string>){
         showWindow_ = !showWindow_;
     }, "Toggle UI", PERMISSION_ALL);
 
-    ScanMaps(); // initial scan with default "Mods"
+    ScanMaps(); // initial scan with "Mods"
 
-    cvarManager->log("HostWorkshopMaps loaded successfully (default = Mods folder)");
+    cvarManager->log("HostWorkshopMaps loaded (default = Mods folder). Type hwm_toggle");
 }
 
 void HostWorkshopMaps::onUnload() {}
 
-void HostWorkshopMaps::Render() {
+void HostWorkshopMaps::Render(CanvasWrapper) {
+    if (!showWindow_) return;
+
     ImGui::SetNextWindowSize(ImVec2(650, 550), ImGuiCond_FirstUseEver);
     if (!ImGui::Begin("Host Workshop Maps", &showWindow_)) {
         ImGui::End();
         return;
     }
 
-    ImGui::Text("Subfolder name (Mods / maps / Map / etc):");
-    if (ImGui::InputText("##sub", &subFolder_, ImGuiInputTextFlags_EnterReturnsTrue)) {
+    ImGui::Text("Subfolder (Mods / maps / Map / etc):");
+    if (ImGui::InputText("##subfolder", &subFolder_, ImGuiInputTextFlags_EnterReturnsTrue)) {
         ScanMaps();
     }
-    ImGui::SameLine();
-    if (ImGui::Button("Scan")) ScanMaps();
+    if (ImGui::Button("Scan Folder")) ScanMaps();
 
-    ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.2f, 1.0f), "%s", statusMsg_.c_str());
+    ImGui::TextColored(ImVec4(1.0f, 0.8f, 0.0f, 1.0f), "%s", statusMsg_.c_str());
 
     ImGui::Separator();
     ImGui::Text("Maps (%d)", (int)mapList_.size());
 
-    if (ImGui::BeginChild("maps", ImVec2(0, 320), true)) {
+    if (ImGui::BeginChild("MapList", ImVec2(0, 300), true)) {
         for (const auto& m : mapList_) {
             if (ImGui::Selectable(m.displayName.c_str())) {
                 LoadMap(m.fullPath, false);
