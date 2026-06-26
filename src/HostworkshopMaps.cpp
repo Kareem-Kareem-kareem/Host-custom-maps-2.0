@@ -94,9 +94,6 @@ void HostWorkshopMaps::onLoad()
         SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
     }, "Select previous map", PERMISSION_ALL);
 
-    gameWrapper->HookEvent("Function TAGame.Car_TA.SetVehicleInput",
-        [this](std::string e) { OnTick(e); });
-
     gameWrapper->SetTimeout([this](GameWrapper*) {
         mapsDirectory_ = SanitizePath(
             cvarManager->getCvar("hwm_maps_directory").getStringValue());
@@ -109,7 +106,6 @@ void HostWorkshopMaps::onLoad()
 
 void HostWorkshopMaps::onUnload()
 {
-    gameWrapper->UnhookEvent("Function TAGame.Car_TA.SetVehicleInput");
 }
 
 void HostWorkshopMaps::ScanMaps()
@@ -158,13 +154,4 @@ void HostWorkshopMaps::TeleportLANPlayers(const std::string& path)
     ServerWrapper server = gameWrapper->GetCurrentGameState();
     if (server.IsNull() || !server.HasAuthority()) return;
     gameWrapper->ExecuteUnrealCommand("servertravel \"" + path + "\"");
-}
-
-void HostWorkshopMaps::OnTick(std::string)
-{
-    if (!pendingLANTransport_) return;
-    if (--transportCountdown_ > 0) return;
-    pendingLANTransport_ = false;
-    TeleportLANPlayers(pendingMapPath_);
-    pendingMapPath_.clear();
 }
