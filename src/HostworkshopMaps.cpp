@@ -23,7 +23,9 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
     HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
     if (h == INVALID_HANDLE_VALUE) return;
 
+    int count = 0;
     do {
+        if (count > 500) break; // safety limit
         if (!strcmp(fd.cFileName, ".") || !strcmp(fd.cFileName, "..")) continue;
 
         std::string full = dir + "\\" + fd.cFileName;
@@ -41,6 +43,7 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
             for (char& c : me.fullPath) if (c == '\\') c = '/';
             me.displayName = name.substr(0, dot);
             out.push_back(me);
+            count++;
         }
     } while (FindNextFileA(h, &fd));
 
@@ -48,7 +51,7 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Full path to your maps folder", true, true, 0, true, 0, true);
+    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "C:\\", "Full path to maps folder", true, true, 0, true, 0, true);
     dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar){
         mapsDirectory_ = cvar.getStringValue();
         if (!mapsDirectory_.empty()) ScanMaps();
@@ -57,40 +60,41 @@ void HostWorkshopMaps::onLoad() {
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_load", [this](std::vector<std::string> params){
-        if (params.empty()) {
-            cvarManager->log("Usage: hwm_load <number>");
-            return;
-        }
+        if (params.empty()) { cvarManager->log("Usage: hwm_load <number>"); return; }
         LoadMap(std::stoi(params[0]), false);
-    }, "Load map (Solo)", PERMISSION_ALL);
+    }, "Load Solo", PERMISSION_ALL);
 
     cvarManager->registerNotifier("hwm_lan", [this](std::vector<std::string> params){
-        if (params.empty()) {
-            cvarManager->log("Usage: hwm_lan <number>");
-            return;
-        }
+        if (params.empty()) { cvarManager->log("Usage: hwm_lan <number>"); return; }
         LoadMap(std::stoi(params[0]), true);
-    }, "Load map (LAN)", PERMISSION_ALL);
+    }, "Load LAN", PERMISSION_ALL);
 
-    cvarManager->log("HostWorkshopMaps loaded. Set path with: hwm_maps_directory \"D:/RLMAPS\"");
+    // Initial scan with C:\
+    ScanMaps();
+
+    cvarManager->log("HostWorkshopMaps loaded (default C:\\)");
+    cvarManager->log("Change path: hwm_maps_directory \"D:\\RLMAPS\"");
 }
 
 void HostWorkshopMaps::onUnload() {}
 
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
+
     if (mapsDirectory_.empty()) {
-        SetStatus("No directory set. Use: hwm_maps_directory \"full/path\"");
+        SetStatus("No directory set");
         return;
     }
 
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
-        SetStatus("Directory not found: " + mapsDirectory_);
+        SetStatus("Directory not found");
         return;
     }
 
+    SetStatus("Scanning " + mapsDirectory_ + " ... (limited)");
     SafeWalkDir(mapsDirectory_, mapList_);
+
     std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
         return a.displayName < b.displayName;
     });
@@ -100,7 +104,7 @@ void HostWorkshopMaps::ScanMaps() {
 
 void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
     if (index < 0 || index >= (int)mapList_.size()) {
-        SetStatus("Invalid map number");
+        SetStatus("Invalid number");
         return;
     }
 
@@ -109,7 +113,7 @@ void HostWorkshopMaps::LoadMap(int index, bool isLAN) {
     if (isLAN && gameWrapper->IsInGame()) {
         ServerWrapper server = gameWrapper->GetCurrentGameState();
         if (!server.IsNull() && server.HasAuthority()) {
-            SetStatus("LAN: Changing to " + m.displayName);
+            SetStatus("LAN → " + m.displayName);
             gameWrapper->ExecuteUnrealCommand("servertravel \"" + m.fullPath + "\"");
             return;
         }
