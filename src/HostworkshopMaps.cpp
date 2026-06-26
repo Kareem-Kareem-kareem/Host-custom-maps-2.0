@@ -25,17 +25,33 @@ void HostWorkshopMaps::SetStatus(const std::string& msg) {
     cvarManager->log("HostWorkshopMaps: " + msg);
 }
 
-// Safe non-recursive scan with depth limit
+std::string HostWorkshopMaps::AutoDetectMapsPath() {
+    std::vector<std::string> commonPaths = {
+        "C:\\Program Files\\Epic Games\\rocketleague\\TAGame\\CookedPCConsole\\Mods",
+        "C:\\Program Files\\Epic Games\\rocketleague\\TAGame\\CookedPCConsole\\maps",
+        "C:\\RLMAPS",
+        "D:\\RLMAPS",
+        "C:\\Games\\rocketleague\\TAGame\\CookedPCConsole\\Mods",
+        "D:\\Games\\rocketleague\\TAGame\\CookedPCConsole\\Mods"
+    };
+
+    for (const auto& p : commonPaths) {
+        if (GetFileAttributesA(p.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            return p;
+        }
+    }
+    return "C:\\RLMAPS"; // fallback
+}
+
+// Safe non-recursive scan
 static void WalkDir(const std::string& root, std::vector<MapEntry>& out) {
-    std::stack<std::pair<std::string, int>> dirs;  // path + depth
+    std::stack<std::pair<std::string, int>> dirs;
     dirs.push({root, 0});
-    int fileCount = 0;
 
     while (!dirs.empty()) {
         auto [dir, depth] = dirs.top();
         dirs.pop();
-
-        if (depth > 8) continue;  // prevent too deep recursion
+        if (depth > 6) continue;
 
         WIN32_FIND_DATAA fd;
         HANDLE h = FindFirstFileA((dir + "\\*").c_str(), &fd);
@@ -48,7 +64,7 @@ static void WalkDir(const std::string& root, std::vector<MapEntry>& out) {
 
             if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
                 dirs.push({full, depth + 1});
-            } else if (fileCount < 2000) {  // safety limit
+            } else {
                 std::string name = fd.cFileName;
                 size_t dot = name.find_last_of('.');
                 if (dot != std::string::npos) {
@@ -61,7 +77,6 @@ static void WalkDir(const std::string& root, std::vector<MapEntry>& out) {
                         for (char& c : me.fullPath) if (c == '\\') c = '/';
                         me.displayName = name.substr(0, dot);
                         out.push_back(me);
-                        fileCount++;
                     }
                 }
             }
@@ -72,37 +87,23 @@ static void WalkDir(const std::string& root, std::vector<MapEntry>& out) {
 }
 
 void HostWorkshopMaps::onLoad() {
-    auto dirCvar = cvarManager->registerCvar("hwm_maps_directory", "", "Path to custom maps folder", true, true, 0, true, 0, true);
-    dirCvar.addOnValueChanged(std::bind(&HostWorkshopMaps::OnCvarChanged, this, std::placeholders::_1, std::placeholders::_2));
+    mapsDirectory_ = AutoDetectMapsPath();
+    ScanMaps();   // try to scan immediately
 
     cvarManager->registerNotifier("hwm_scan", [this](std::vector<std::string>){ ScanMaps(); }, "Scan maps", PERMISSION_ALL);
 
-    std::string prev = dirCvar.getStringValue();
-    if (!prev.empty()) {
-        mapsDirectory_ = SanitizePath(prev);
-        ScanMaps();
-    }
-
-    cvarManager->log("HostWorkshopMaps loaded successfully");
+    cvarManager->log("HostWorkshopMaps loaded - using path: " + mapsDirectory_);
 }
 
 void HostWorkshopMaps::onUnload() {}
 
-void HostWorkshopMaps::OnCvarChanged(const std::string& cvarName, CVarWrapper cvar) {
-    if (cvarName == "hwm_maps_directory") {
-        mapsDirectory_ = SanitizePath(cvar.getStringValue());
-        if (!mapsDirectory_.empty()) ScanMaps();
-    }
-}
-
 void HostWorkshopMaps::ScanMaps() {
     mapList_.clear();
+
     if (mapsDirectory_.empty()) {
-        SetStatus("No directory set");
+        SetStatus("No maps directory");
         return;
     }
-
-    SetStatus("Scanning " + mapsDirectory_ + "...");
 
     DWORD attr = GetFileAttributesA(mapsDirectory_.c_str());
     if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_DIRECTORY)) {
@@ -110,6 +111,7 @@ void HostWorkshopMaps::ScanMaps() {
         return;
     }
 
+    SetStatus("Scanning...");
     WalkDir(mapsDirectory_, mapList_);
 
     std::sort(mapList_.begin(), mapList_.end(), [](const MapEntry& a, const MapEntry& b){
