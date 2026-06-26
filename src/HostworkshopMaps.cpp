@@ -94,12 +94,6 @@ void HostWorkshopMaps::onLoad()
         SetStatus("Selected [" + std::to_string(selectedIndex_) + "]: " + mapList_[selectedIndex_].displayName);
     }, "Select previous map", PERMISSION_ALL);
 
-    gameWrapper->SetTimeout([this](GameWrapper*) {
-        mapsDirectory_ = SanitizePath(
-            cvarManager->getCvar("hwm_maps_directory").getStringValue());
-        if (!mapsDirectory_.empty()) ScanMaps();
-        else SetStatus("Set hwm_maps_directory then run hwm_scan");
-    }, 5.0f);
 
     cvarManager->log("HostWorkshopMaps: loaded");
 }
