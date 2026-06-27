@@ -1,67 +1,53 @@
-name: Build HostWorkshopMaps Plugin
+name: Build
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, master ]
   pull_request:
-    branches: [ main ]
-  release:
-    types: [ created ]
+    branches: [ main, master ]
 
 jobs:
   build:
     runs-on: windows-latest
-
+    
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+    - uses: actions/checkout@v4
+    
+    - name: Configure CMake
+      run: cmake -B build -S .
+    
+    - name: Build
+      run: cmake --build build --config Release
+    
+    - name: Upload Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: HostworkshopMaps
+        path: build/Release/*.dll
 
-      - name: Cache BakkesMod SDK
-        id: cache-sdk
-        uses: actions/cache@v4
-        with:
-          path: bakkesmod-sdk
-          key: bakkesmod-sdk-v1-${{ runner.os }}
-
-      - name: Download BakkesMod SDK
-        if: steps.cache-sdk.outputs.cache-hit != 'true'
-        shell: pwsh
-        run: |
-          Invoke-WebRequest -Uri "https://github.com/bakkesmodorg/BakkesModSDK/archive/refs/heads/master.zip" -OutFile sdk.zip
-          Expand-Archive sdk.zip -DestinationPath sdk-raw
-          Move-Item sdk-raw/BakkesModSDK-master bakkesmod-sdk
-
-      - name: Configure CMake
-        shell: pwsh
-        run: |
-          cmake -B build -S . `
-            -DBAKKESMOD_SDK="${{ github.workspace }}/bakkesmod-sdk" `
-            -DCMAKE_BUILD_TYPE=Release
-
-      - name: Build
-        shell: pwsh
-        run: cmake --build build --config Release
-
-      - name: Locate built DLL
-        id: locate
-        shell: pwsh
-        run: |
-          $dll = Get-ChildItem -Path build -Filter "HostWorkshopMaps.dll" -Recurse | Select-Object -First 1
-          if (-not $dll) { Write-Error "DLL not found"; exit 1 }
-          echo "dll_path=$($dll.FullName)" >> $env:GITHUB_OUTPUT
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: HostWorkshopMaps-release
-          path: |
-            ${{ steps.locate.outputs.dll_path }}
-            HostWorkshopMaps.set
-
-      - name: Attach to release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v1
-        with:
-          files: |
-            ${{ steps.locate.outputs.dll_path }}
-            HostWorkshopMaps.set
+  imgui-build:
+    runs-on: windows-latest
+    needs: build
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Clone ImGui
+      run: |
+        git clone https://github.com/ocornut/imgui.git external/imgui
+        git clone https://github.com/ocornut/imgui.git --branch docking external/imgui-docking
+    
+    - name: Configure CMake with ImGui
+      run: |
+        cmake -B build-imgui -S . ^
+          -DENABLE_IMGUI=ON ^
+          -DIMGUI_PATH=external/imgui
+    
+    - name: Build with ImGui
+      run: cmake --build build-imgui --config Release
+    
+    - name: Upload ImGui Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: HostworkshopMaps-ImGui
+        path: build-imgui/Release/*.dll
