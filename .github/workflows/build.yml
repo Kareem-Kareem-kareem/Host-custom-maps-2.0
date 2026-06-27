@@ -18,7 +18,8 @@ jobs:
         git clone https://github.com/bakkesmodorg/BakkesModSDK.git bakkesmodsdk
     
     - name: Configure CMake
-      run: cmake -B build -S .
+      shell: pwsh
+      run: cmake -B build -S . "-DBAKKESMOD_SDK_PATH=$env:GITHUB_WORKSPACE/bakkesmodsdk"
     
     - name: Build
       run: cmake --build build --config Release
@@ -45,10 +46,8 @@ jobs:
         git clone https://github.com/ocornut/imgui.git external/imgui
     
     - name: Configure CMake with ImGui
-      run: |
-        cmake -B build-imgui -S . `
-          -DENABLE_IMGUI=ON `
-          -DIMGUI_PATH=external/imgui
+      shell: pwsh
+      run: cmake -B build-imgui -S . "-DBAKKESMOD_SDK_PATH=$env:GITHUB_WORKSPACE/bakkesmodsdk" "-DENABLE_IMGUI=ON" "-DIMGUI_PATH=external/imgui"
     
     - name: Build with ImGui
       run: cmake --build build-imgui --config Release
