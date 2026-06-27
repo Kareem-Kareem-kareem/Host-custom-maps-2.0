@@ -9,14 +9,27 @@
 #include "HostWorkshopMaps.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/gameevent/serverwrapper.h"
-#include "imgui/imgui.h"
+#include <imgui/imgui.h>
 #include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
-#include <cstdio>
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", 0)
+
+// ---------------------------------------------------------------------------
+// PluginWindow required overrides
+// ---------------------------------------------------------------------------
+
+std::string HostWorkshopMaps::GetPluginName()
+{
+    return "Host Workshop Maps";
+}
+
+void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
+{
+    ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,6 +89,120 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out)
 }
 
 // ---------------------------------------------------------------------------
+// ImGui UI  (called every frame by BakkesMod via PluginWindow::Render)
+// ---------------------------------------------------------------------------
+
+void HostWorkshopMaps::Render()
+{
+    ImGui::SetNextWindowSize(ImVec2(520, 420), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin("Host Workshop Maps", &isWindowOpen_, ImGuiWindowFlags_NoCollapse))
+    {
+        ImGui::End();
+        return;
+    }
+
+    // ---- Status bar -------------------------------------------------------
+    if (!statusMsg_.empty())
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+        ImGui::TextWrapped("%s", statusMsg_.c_str());
+        ImGui::PopStyleColor();
+        ImGui::Separator();
+    }
+
+    // ---- Directory input --------------------------------------------------
+    ImGui::Text("Maps Directory:");
+    ImGui::SetNextItemWidth(-140.0f);
+    bool enterPressed = ImGui::InputText(
+        "##dir", directoryBuffer_, IM_ARRAYSIZE(directoryBuffer_),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    ImGui::SameLine();
+    if (ImGui::Button("Scan", ImVec2(60, 0)) || enterPressed)
+    {
+        mapsDirectory_ = directoryBuffer_;
+        ScanMaps();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Clear", ImVec2(60, 0)))
+    {
+        memset(directoryBuffer_, 0, sizeof(directoryBuffer_));
+        mapsDirectory_.clear();
+        mapList_.clear();
+        selectedMapIndex_ = -1;
+        SetStatus("Cleared.");
+    }
+
+    // ---- Map list ---------------------------------------------------------
+    ImGui::Separator();
+    ImGui::Text("Available Maps (%zu)", mapList_.size());
+
+    if (mapList_.empty())
+    {
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
+        ImGui::TextWrapped("No maps found. Set a directory and click Scan.");
+        ImGui::PopStyleColor();
+    }
+    else
+    {
+        ImGui::BeginChild("##maplist", ImVec2(0.0f, 210.0f), true);
+        for (int i = 0; i < static_cast<int>(mapList_.size()); i++)
+        {
+            bool selected = (i == selectedMapIndex_);
+            if (ImGui::Selectable(
+                    mapList_[i].displayName.c_str(),
+                    selected,
+                    ImGuiSelectableFlags_AllowDoubleClick))
+            {
+                selectedMapIndex_ = i;
+                if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+                    LoadMap(i, false);
+            }
+        }
+        ImGui::EndChild();
+    }
+
+    // ---- Action buttons ---------------------------------------------------
+    ImGui::Separator();
+
+    const char* selName = (selectedMapIndex_ >= 0 &&
+                           selectedMapIndex_ < static_cast<int>(mapList_.size()))
+                              ? mapList_[selectedMapIndex_].displayName.c_str()
+                              : "None";
+    ImGui::Text("Selected: %s", selName);
+
+    bool hasSelection = selectedMapIndex_ >= 0 &&
+                        selectedMapIndex_ < static_cast<int>(mapList_.size());
+
+    if (!hasSelection)
+    {
+        ImGui::BeginDisabled();
+    }
+
+    if (ImGui::Button("Load Solo", ImVec2(130, 0)))
+        LoadMap(selectedMapIndex_, false);
+
+    ImGui::SameLine();
+
+    if (ImGui::Button("Host LAN", ImVec2(130, 0)))
+        LoadMap(selectedMapIndex_, true);
+
+    if (!hasSelection)
+    {
+        ImGui::EndDisabled();
+    }
+
+    // ---- Footer hint ------------------------------------------------------
+    ImGui::Spacing();
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
+    ImGui::TextWrapped(
+        "Tip: double-click a map to load it in solo. "
+        "Console: hwm_scan  hwm_list  hwm_load <n>  hwm_lan <n>");
+    ImGui::PopStyleColor();
+
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
 // Plugin lifecycle
 // ---------------------------------------------------------------------------
 
@@ -88,6 +215,8 @@ void HostWorkshopMaps::onLoad()
     dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar)
     {
         mapsDirectory_ = cvar.getStringValue();
+        strncpy_s(directoryBuffer_, sizeof(directoryBuffer_),
+                  mapsDirectory_.c_str(), _TRUNCATE);
         if (!mapsDirectory_.empty()) ScanMaps();
     });
 
@@ -154,7 +283,8 @@ void HostWorkshopMaps::onLoad()
         "Host map over LAN", PERMISSION_ALL);
 
     cvarManager->log("HostWorkshopMaps loaded.");
-    cvarManager->log("Commands: hwm_maps_directory \"path\" -> hwm_scan -> hwm_list -> hwm_load 0");
+    cvarManager->log("Open BakkesMod plugins tab to access the UI.");
+    cvarManager->log("Console: hwm_maps_directory \"path\"  hwm_scan  hwm_list  hwm_load 0");
 }
 
 void HostWorkshopMaps::onUnload() {}
@@ -166,10 +296,11 @@ void HostWorkshopMaps::onUnload() {}
 void HostWorkshopMaps::ScanMaps()
 {
     mapList_.clear();
+    selectedMapIndex_ = -1;
 
     if (mapsDirectory_.empty())
     {
-        SetStatus("Set hwm_maps_directory first");
+        SetStatus("Set hwm_maps_directory first.");
         return;
     }
 
@@ -188,7 +319,7 @@ void HostWorkshopMaps::ScanMaps()
             return a.displayName < b.displayName;
         });
 
-    SetStatus("Found " + std::to_string(mapList_.size()) + " map(s)");
+    SetStatus("Found " + std::to_string(mapList_.size()) + " map(s).");
 }
 
 // ---------------------------------------------------------------------------
@@ -211,14 +342,14 @@ void HostWorkshopMaps::LoadMap(int index, bool isLAN)
         {
             if (!gameWrapper->IsInGame())
             {
-                SetStatus("Not in a game");
+                SetStatus("Not in a game.");
                 return;
             }
 
             ServerWrapper server = gameWrapper->GetCurrentGameState();
             if (server.IsNull() || !server.HasAuthority())
             {
-                SetStatus("Not host or not in a LAN match");
+                SetStatus("Not host or not in a LAN match.");
                 return;
             }
 
@@ -233,83 +364,6 @@ void HostWorkshopMaps::LoadMap(int index, bool isLAN)
     }
     catch (...)
     {
-        SetStatus("Error while loading map");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// ImGui Settings Window (BakkesMod F2 Menu -> Plugins -> Host Workshop Maps)
-// ---------------------------------------------------------------------------
-
-std::string HostWorkshopMaps::GetPluginName()
-{
-    return "Host Workshop Maps";
-}
-
-void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
-{
-    ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
-}
-
-void HostWorkshopMaps::RenderSettings()
-{
-    ImGui::TextUnformatted("Workshop Maps Directory:");
-
-    char dirBuf[512];
-    snprintf(dirBuf, sizeof(dirBuf), "%s", mapsDirectory_.c_str());
-
-    if (ImGui::InputText("##mapsDir", dirBuf, sizeof(dirBuf)))
-    {
-        mapsDirectory_ = dirBuf;
-        cvarManager->getCvar("hwm_maps_directory").setValue(mapsDirectory_);
-    }
-
-    ImGui::SameLine();
-    if (ImGui::Button("Scan Folder"))
-    {
-        ScanMaps();
-    }
-
-    if (!statusMsg_.empty())
-    {
-        ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.9f, 0.75f, 0.2f, 1.0f), "Status: %s", statusMsg_.c_str());
-    }
-
-    ImGui::Separator();
-    ImGui::Spacing();
-    ImGui::Text("Scanned Maps (%d):", static_cast<int>(mapList_.size()));
-
-    if (mapList_.empty())
-    {
-        ImGui::TextDisabled("No maps scanned. Configure path above and click Scan.");
-        return;
-    }
-
-    if (ImGui::BeginChild("MapsListChild", ImVec2(0, 320), true))
-    {
-        for (int i = 0; i < static_cast<int>(mapList_.size()); ++i)
-        {
-            const auto& m = mapList_[i];
-            ImGui::PushID(i);
-
-            ImGui::AlignTextToFramePadding();
-            ImGui::Text("%d. %s", i, m.displayName.c_str());
-
-            ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 150);
-
-            if (ImGui::Button("Solo", ImVec2(65, 0)))
-            {
-                LoadMap(i, false);
-            }
-            ImGui::SameLine();
-            if (ImGui::Button("Host LAN", ImVec2(75, 0)))
-            {
-                LoadMap(i, true);
-            }
-
-            ImGui::PopID();
-        }
-        ImGui::EndChild();
+        SetStatus("Error while loading map.");
     }
 }
