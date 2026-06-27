@@ -9,10 +9,12 @@
 #include "HostWorkshopMaps.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/gameevent/serverwrapper.h"
+#include "bakkesmod/plugin/pluginwindow.h"
 #include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <imgui.h>
 
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", 0)
 
@@ -74,11 +76,114 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out)
 }
 
 // ---------------------------------------------------------------------------
+// UI Rendering (ImGui)
+// ---------------------------------------------------------------------------
+
+void HostWorkshopMaps::RenderUI()
+{
+    if (!uiOpen_) return;
+
+    ImGui::SetNextWindowSize(ImVec2(500, 400), ImGuiCond_FirstUseEver);
+    if (ImGui::Begin("Host Workshop Maps", &uiOpen_, ImGuiWindowFlags_NoCollapse))
+    {
+        // Status bar
+        if (!statusMsg_.empty())
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.8f, 0.2f, 1.0f));
+            ImGui::Text("%s", statusMsg_.c_str());
+            ImGui::PopStyleColor();
+            ImGui::Separator();
+        }
+
+        // Directory input
+        ImGui::Text("Maps Directory:");
+        ImGui::SameLine();
+        if (ImGui::InputText("##dirinput", directoryBuffer_, IM_ARRAYSIZE(directoryBuffer_), ImGuiInputTextFlags_EnterReturnsTrue))
+        {
+            mapsDirectory_ = directoryBuffer_;
+            ScanMaps();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Scan"))
+        {
+            mapsDirectory_ = directoryBuffer_;
+            ScanMaps();
+        }
+
+        // Maps list
+        ImGui::Separator();
+        ImGui::Text("Available Maps (%zu):", mapList_.size());
+
+        if (mapList_.empty())
+        {
+            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.6f, 0.6f, 0.6f, 1.0f));
+            ImGui::TextWrapped("No maps found. Set a directory and click Scan.");
+            ImGui::PopStyleColor();
+        }
+        else
+        {
+            ImGui::BeginChild("MapList", ImVec2(0, 200), true);
+            for (size_t i = 0; i < mapList_.size(); i++)
+            {
+                bool isSelected = (static_cast<int>(i) == selectedMapIndex_);
+                if (ImGui::Selectable(mapList_[i].displayName.c_str(), isSelected, ImGuiSelectableFlags_AllowDoubleClick))
+                {
+                    selectedMapIndex_ = static_cast<int>(i);
+                    if (ImGui::IsMouseDoubleClicked(0))
+                    {
+                        LoadMap(selectedMapIndex_, false);
+                    }
+                }
+            }
+            ImGui::EndChild();
+        }
+
+        // Action buttons
+        ImGui::Separator();
+        ImGui::Text("Selected: %s", 
+            selectedMapIndex_ >= 0 && selectedMapIndex_ < static_cast<int>(mapList_.size())
+                ? mapList_[selectedMapIndex_].displayName.c_str()
+                : "None");
+
+        ImGui::SameLine();
+        if (ImGui::Button("Load Solo", ImVec2(120, 0)))
+        {
+            if (selectedMapIndex_ >= 0)
+                LoadMap(selectedMapIndex_, false);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Host LAN", ImVec2(120, 0)))
+        {
+            if (selectedMapIndex_ >= 0)
+                LoadMap(selectedMapIndex_, true);
+        }
+
+        // Console commands info
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.5f, 0.5f, 0.5f, 1.0f));
+        ImGui::TextWrapped("Console commands: hwm_scan, hwm_list, hwm_load <idx>, hwm_lan <idx>");
+        ImGui::PopStyleColor();
+    }
+    ImGui::End();
+}
+
+// ---------------------------------------------------------------------------
 // Plugin lifecycle
 // ---------------------------------------------------------------------------
 
 void HostWorkshopMaps::onLoad()
 {
+    // Register UI toggle command
+    cvarManager->registerNotifier("hwm_ui",
+        [this](std::vector<std::string>)
+        {
+            uiOpen_ = !uiOpen_;
+        },
+        "Toggle HWM UI", PERMISSION_ALL);
+
+    // Register the plugin window for rendering
+    pluginWindow->registerDrawFunction("HostWorkshopMaps", [this]() { RenderUI(); });
+
     auto dirCvar = cvarManager->registerCvar(
         "hwm_maps_directory", "", "Full path to your maps folder",
         true, true, 0, true, 0, true);
@@ -86,6 +191,8 @@ void HostWorkshopMaps::onLoad()
     dirCvar.addOnValueChanged([this](std::string, CVarWrapper cvar)
     {
         mapsDirectory_ = cvar.getStringValue();
+        strncpy(directoryBuffer_, mapsDirectory_.c_str(), sizeof(directoryBuffer_) - 1);
+        directoryBuffer_[sizeof(directoryBuffer_) - 1] = '\0';
         if (!mapsDirectory_.empty()) ScanMaps();
     });
 
@@ -105,9 +212,6 @@ void HostWorkshopMaps::onLoad()
         },
         "List scanned maps", PERMISSION_ALL);
 
-    // FIX: params[0] is the command name in BakkesMod, not the first argument.
-    //      The user argument "0" lands in params[1].
-    //      Old code: std::stoi(params[0]) == std::stoi("hwm_load") -> throws -> CRASH
     cvarManager->registerNotifier("hwm_load",
         [this](std::vector<std::string> params)
         {
@@ -155,10 +259,13 @@ void HostWorkshopMaps::onLoad()
         "Host map over LAN", PERMISSION_ALL);
 
     cvarManager->log("HostWorkshopMaps loaded.");
-    cvarManager->log("Commands: hwm_maps_directory \"path\" -> hwm_scan -> hwm_list -> hwm_load 0");
+    cvarManager->log("Commands: hwm_ui (toggle UI), hwm_maps_directory \"path\", hwm_scan, hwm_list, hwm_load 0");
 }
 
-void HostWorkshopMaps::onUnload() {}
+void HostWorkshopMaps::onUnload()
+{
+    pluginWindow->removeDrawFunction("HostWorkshopMaps");
+}
 
 // ---------------------------------------------------------------------------
 // Map scanning
@@ -183,7 +290,6 @@ void HostWorkshopMaps::ScanMaps()
 
     SafeWalkDir(mapsDirectory_, mapList_);
 
-    // FIX: was "a.displayName = b.displayName" (assignment not comparison) -> UB -> crash
     std::sort(mapList_.begin(), mapList_.end(),
         [](const MapEntry& a, const MapEntry& b)
         {
@@ -224,13 +330,11 @@ void HostWorkshopMaps::LoadMap(int index, bool isLAN)
                 return;
             }
 
-            // FIX: servertravel expects a package name, not a filesystem path
             SetStatus("LAN travel: " + m.displayName);
             gameWrapper->ExecuteUnrealCommand("servertravel " + m.displayName);
         }
         else
         {
-            // FIX: "load_workshop" is not a valid command; "open" is correct for UE3
             SetStatus("Loading solo: " + m.displayName);
             gameWrapper->ExecuteUnrealCommand("open \"" + m.fullPath + "\"");
         }
