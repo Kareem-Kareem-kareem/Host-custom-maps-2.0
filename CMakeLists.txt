@@ -18,6 +18,7 @@ add_library(HostWorkshopMaps SHARED
 
 target_include_directories(HostWorkshopMaps PRIVATE
     ${BAKKESMOD_SDK}/include
+    ${BAKKESMOD_SDK}/include/imgui
     src
 )
 
