@@ -15,9 +15,7 @@ jobs:
     
     - name: Install BakkesMod SDK
       run: |
-        git clone https://github.com/AliCSDev/BakkesModSdk.git external/BakkesModSDK
-        # Or use the official SDK:
-        # git clone https://gitlab.com/bakkesplugins/sdk/bakkesmod-sdk.git external/BakkesModSDK
+        git clone https://gitlab.com/bakkesplugins/sdk/bakkesmod-sdk.git external/BakkesModSDK
     
     - name: Configure CMake
       run: cmake -B build -S . -DBAKKESMOD_SDK_PATH="${{ github.workspace }}/external/BakkesModSDK"
@@ -40,7 +38,7 @@ jobs:
     
     - name: Install BakkesMod SDK
       run: |
-        git clone https://github.com/AliCSDev/BakkesModSdk.git external/BakkesModSDK
+        git clone https://gitlab.com/bakkesplugins/sdk/bakkesmod-sdk.git external/BakkesModSDK
     
     - name: Clone ImGui
       run: |
