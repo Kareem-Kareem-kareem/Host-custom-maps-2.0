@@ -15,10 +15,10 @@ jobs:
     
     - name: Install BakkesMod SDK
       run: |
-        git clone https://github.com/bakkesmodorg/BakkesModSDK.git external/BakkesModSDK
+        git clone https://github.com/bakkesmodorg/BakkesModSDK.git bakkesmodsdk
     
     - name: Configure CMake
-      run: cmake -B build -S . -DBAKKESMOD_SDK_PATH="${{ github.workspace }}/external/BakkesModSDK"
+      run: cmake -B build -S .
     
     - name: Build
       run: cmake --build build --config Release
@@ -38,7 +38,7 @@ jobs:
     
     - name: Install BakkesMod SDK
       run: |
-        git clone https://github.com/bakkesmodorg/BakkesModSDK.git external/BakkesModSDK
+        git clone https://github.com/bakkesmodorg/BakkesModSDK.git bakkesmodsdk
     
     - name: Clone ImGui
       run: |
@@ -47,7 +47,6 @@ jobs:
     - name: Configure CMake with ImGui
       run: |
         cmake -B build-imgui -S . `
-          -DBAKKESMOD_SDK_PATH="${{ github.workspace }}/external/BakkesModSDK" `
           -DENABLE_IMGUI=ON `
           -DIMGUI_PATH=external/imgui
     
