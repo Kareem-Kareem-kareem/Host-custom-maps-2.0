@@ -9,7 +9,7 @@
 #include "HostWorkshopMaps.h"
 #include "bakkesmod/wrappers/gamewrapper.h"
 #include "bakkesmod/wrappers/gameevent/serverwrapper.h"
-#include <imgui/imgui.h>
+#include "imgui.h"
 #include <algorithm>
 #include <stdexcept>
 #include <string>
@@ -18,10 +18,15 @@
 BAKKESMOD_PLUGIN(HostWorkshopMaps, "Host Workshop Maps", "2.0", 0)
 
 // ---------------------------------------------------------------------------
-// PluginWindow required overrides
+// PluginWindow overrides
 // ---------------------------------------------------------------------------
 
-std::string HostWorkshopMaps::GetPluginName()
+std::string HostWorkshopMaps::GetMenuName()
+{
+    return "hostworkshopmaps";
+}
+
+std::string HostWorkshopMaps::GetMenuTitle()
 {
     return "Host Workshop Maps";
 }
@@ -29,6 +34,26 @@ std::string HostWorkshopMaps::GetPluginName()
 void HostWorkshopMaps::SetImGuiContext(uintptr_t ctx)
 {
     ImGui::SetCurrentContext(reinterpret_cast<ImGuiContext*>(ctx));
+}
+
+bool HostWorkshopMaps::ShouldBlockInput()
+{
+    return ImGui::GetIO().WantCaptureMouse || ImGui::GetIO().WantCaptureKeyboard;
+}
+
+bool HostWorkshopMaps::IsActiveOverlay()
+{
+    return false;
+}
+
+void HostWorkshopMaps::OnOpen()
+{
+    isWindowOpen_ = true;
+}
+
+void HostWorkshopMaps::OnClose()
+{
+    isWindowOpen_ = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -89,13 +114,15 @@ static void SafeWalkDir(const std::string& dir, std::vector<MapEntry>& out)
 }
 
 // ---------------------------------------------------------------------------
-// ImGui UI  (called every frame by BakkesMod via PluginWindow::Render)
+// ImGui UI
 // ---------------------------------------------------------------------------
 
 void HostWorkshopMaps::Render()
 {
-    ImGui::SetNextWindowSize(ImVec2(520, 420), ImGuiCond_FirstUseEver);
-    if (!ImGui::Begin("Host Workshop Maps", &isWindowOpen_, ImGuiWindowFlags_NoCollapse))
+    if (!isWindowOpen_) return;
+
+    ImGui::SetNextWindowSize(ImVec2(520, 430), ImGuiCond_FirstUseEver);
+    if (!ImGui::Begin(GetMenuTitle().c_str(), &isWindowOpen_, ImGuiWindowFlags_NoCollapse))
     {
         ImGui::End();
         return;
@@ -139,7 +166,7 @@ void HostWorkshopMaps::Render()
     if (mapList_.empty())
     {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.55f, 0.55f, 0.55f, 1.0f));
-        ImGui::TextWrapped("No maps found. Set a directory and click Scan.");
+        ImGui::TextWrapped("No maps found. Set a directory above and click Scan.");
         ImGui::PopStyleColor();
     }
     else
@@ -164,19 +191,16 @@ void HostWorkshopMaps::Render()
     // ---- Action buttons ---------------------------------------------------
     ImGui::Separator();
 
-    const char* selName = (selectedMapIndex_ >= 0 &&
-                           selectedMapIndex_ < static_cast<int>(mapList_.size()))
-                              ? mapList_[selectedMapIndex_].displayName.c_str()
-                              : "None";
+    const char* selName =
+        (selectedMapIndex_ >= 0 && selectedMapIndex_ < static_cast<int>(mapList_.size()))
+            ? mapList_[selectedMapIndex_].displayName.c_str()
+            : "None";
     ImGui::Text("Selected: %s", selName);
 
-    bool hasSelection = selectedMapIndex_ >= 0 &&
-                        selectedMapIndex_ < static_cast<int>(mapList_.size());
+    bool hasSelection = (selectedMapIndex_ >= 0 &&
+                         selectedMapIndex_ < static_cast<int>(mapList_.size()));
 
-    if (!hasSelection)
-    {
-        ImGui::BeginDisabled();
-    }
+    if (!hasSelection) ImGui::BeginDisabled();
 
     if (ImGui::Button("Load Solo", ImVec2(130, 0)))
         LoadMap(selectedMapIndex_, false);
@@ -186,12 +210,9 @@ void HostWorkshopMaps::Render()
     if (ImGui::Button("Host LAN", ImVec2(130, 0)))
         LoadMap(selectedMapIndex_, true);
 
-    if (!hasSelection)
-    {
-        ImGui::EndDisabled();
-    }
+    if (!hasSelection) ImGui::EndDisabled();
 
-    // ---- Footer hint ------------------------------------------------------
+    // ---- Footer -----------------------------------------------------------
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.45f, 0.45f, 0.45f, 1.0f));
     ImGui::TextWrapped(
@@ -283,7 +304,7 @@ void HostWorkshopMaps::onLoad()
         "Host map over LAN", PERMISSION_ALL);
 
     cvarManager->log("HostWorkshopMaps loaded.");
-    cvarManager->log("Open BakkesMod plugins tab to access the UI.");
+    cvarManager->log("Open F2 > Plugins > Host Workshop Maps to use the UI.");
     cvarManager->log("Console: hwm_maps_directory \"path\"  hwm_scan  hwm_list  hwm_load 0");
 }
 
