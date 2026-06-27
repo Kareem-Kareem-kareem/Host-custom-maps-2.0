@@ -1,23 +1,25 @@
 #pragma once
 #include "bakkesmod/plugin/bakkesmodplugin.h"
-#include "bakkesmod/plugin/PluginSettingsWindow.h"
+#include "bakkesmod/plugin/pluginwindow.h"
 #include <vector>
 #include <string>
 #include <algorithm>
 
-struct MapEntry {
+struct MapEntry
+{
     std::string displayName;
     std::string fullPath;
 };
 
-class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin, public BakkesMod::Plugin::PluginSettingsWindow
+class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
+                         public BakkesMod::Plugin::PluginWindow
 {
 public:
     void onLoad() override;
     void onUnload() override;
 
-    // PluginSettingsWindow implementation (F2 -> Plugins -> Host Workshop Maps)
-    void RenderSettings() override;
+    // PluginWindow overrides
+    void Render() override;
     std::string GetPluginName() override;
     void SetImGuiContext(uintptr_t ctx) override;
 
@@ -30,4 +32,7 @@ private:
     std::vector<MapEntry> mapList_;
     std::string mapsDirectory_;
     std::string statusMsg_;
+    int selectedMapIndex_ = -1;
+    bool isWindowOpen_ = true;
+    char directoryBuffer_[512] = {};
 };
