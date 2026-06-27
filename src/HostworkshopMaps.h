@@ -3,7 +3,6 @@
 #include "bakkesmod/plugin/pluginwindow.h"
 #include <vector>
 #include <string>
-#include <algorithm>
 
 struct MapEntry
 {
@@ -15,13 +14,19 @@ class HostWorkshopMaps : public BakkesMod::Plugin::BakkesModPlugin,
                          public BakkesMod::Plugin::PluginWindow
 {
 public:
+    // BakkesModPlugin
     void onLoad() override;
     void onUnload() override;
 
-    // PluginWindow overrides
+    // PluginWindow — all 8 pure virtuals must be implemented
     void Render() override;
-    std::string GetPluginName() override;
+    std::string GetMenuName() override;
+    std::string GetMenuTitle() override;
     void SetImGuiContext(uintptr_t ctx) override;
+    bool ShouldBlockInput() override;
+    bool IsActiveOverlay() override;
+    void OnOpen() override;
+    void OnClose() override;
 
 private:
     void ScanMaps();
@@ -33,6 +38,6 @@ private:
     std::string mapsDirectory_;
     std::string statusMsg_;
     int selectedMapIndex_ = -1;
-    bool isWindowOpen_ = true;
+    bool isWindowOpen_ = false;
     char directoryBuffer_[512] = {};
 };
