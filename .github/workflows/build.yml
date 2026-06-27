@@ -9,45 +9,27 @@ on:
 jobs:
   build:
     runs-on: windows-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+
+    - name: Clone BakkesMod SDK
+      run: git clone https://github.com/bakkesmodorg/BakkesModSDK.git external/BakkesModSDK
+
+    - name: Clone ImGui
+      run: git clone https://github.com/ocornut/imgui.git external/imgui
+
     - name: Configure CMake
-      run: cmake -B build -S .
-    
+      run: >
+        cmake -B build -S .
+        -DBAKKESMOD_SDK_PATH=${{ github.workspace }}/external/BakkesModSDK
+        -DIMGUI_PATH=${{ github.workspace }}/external/imgui
+
     - name: Build
       run: cmake --build build --config Release
-    
+
     - name: Upload Artifacts
       uses: actions/upload-artifact@v4
       with:
         name: HostworkshopMaps
         path: build/Release/*.dll
-
-  imgui-build:
-    runs-on: windows-latest
-    needs: build
-    
-    steps:
-    - uses: actions/checkout@v4
-    
-    - name: Clone ImGui
-      run: |
-        git clone https://github.com/ocornut/imgui.git external/imgui
-        git clone https://github.com/ocornut/imgui.git --branch docking external/imgui-docking
-    
-    - name: Configure CMake with ImGui
-      run: |
-        cmake -B build-imgui -S . ^
-          -DENABLE_IMGUI=ON ^
-          -DIMGUI_PATH=external/imgui
-    
-    - name: Build with ImGui
-      run: cmake --build build-imgui --config Release
-    
-    - name: Upload ImGui Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: HostworkshopMaps-ImGui
-        path: build-imgui/Release/*.dll
